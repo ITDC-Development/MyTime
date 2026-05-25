@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "demo-mytime"
-  }
+    "default": "demo-mytime",
+    "demo": "mytime-demo"
+  },
+  "targets": {},
+  "etags": {}
 }

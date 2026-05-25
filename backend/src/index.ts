@@ -7,7 +7,8 @@ import sync from './routes/sync';
 import users from './routes/users';
 
 const app = express();
-app.use(cors());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173').split(',').map(s => s.trim());
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.use('/health', health);

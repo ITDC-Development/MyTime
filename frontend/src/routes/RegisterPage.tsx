@@ -1,42 +1,48 @@
-import { useState } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
-import { Box, Paper, Typography, TextField, Button, Alert, Link, Stack } from '@mui/material';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams, Link as RouterLink } from 'react-router-dom';
+import { Box, Paper, Typography, TextField, Button, Alert, Link, Stack, CircularProgress } from '@mui/material';
 import { Logo } from '../components/common/Logo';
 import { createAccount } from '../services/firestore/users';
+import { validateInvite, markInviteUsed } from '../services/firestore/invites';
 import { BRAND } from '../theme';
-
-const ALLOWED = (import.meta.env.VITE_ALLOWED_EMAIL_DOMAINS || 'it-dc.cz,it-dc.sk').split(',').map(s => s.trim().toLowerCase());
-
-function isAllowedEmail(email: string) {
-  const lower = email.toLowerCase();
-  return ALLOWED.some(d => lower.endsWith('@' + d));
-}
 
 export function RegisterPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [params] = useSearchParams();
+  const inviteToken = params.get('invite') ?? '';
+  const inviteEmail = params.get('email') ?? '';
+
+  const [inviteValid, setInviteValid] = useState<boolean | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
   const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (!inviteToken || !inviteEmail) {
+      setInviteValid(false);
+      setInviteError('Neplatný odkaz. Požádej administrátora o novou pozvánku.');
+      return;
+    }
+    validateInvite(inviteToken, inviteEmail).then(({ valid, reason }) => {
+      setInviteValid(valid);
+      if (!valid) setInviteError(reason ?? 'Neplatná pozvánka.');
+    });
+  }, [inviteToken, inviteEmail]);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    if (!isAllowedEmail(email)) {
-      setError(`Registrace je povolená jen pro emaily ${ALLOWED.map(d => '@' + d).join(' nebo ')}.`);
-      return;
-    }
-    if (password.length < 6) {
-      setError('Heslo musí mít alespoň 6 znaků.');
-      return;
-    }
-    setBusy(true);
+    if (!displayName.trim()) { setError('Vyplň jméno.'); return; }
+    if (password.length < 6) { setError('Heslo musí mít alespoň 6 znaků.'); return; }
+    setBusy(true); setError(null);
     try {
-      await createAccount(email.toLowerCase(), password, displayName);
+      await createAccount(inviteEmail, password, displayName.trim(), 'active', null);
+      await markInviteUsed(inviteToken);
       setSuccess(true);
-      setTimeout(() => navigate('/login'), 2500);
+      setTimeout(() => navigate('/'), 2000);
     } catch (e) {
       setError(String(e).replace('FirebaseError: ', ''));
     } finally {
@@ -49,21 +55,50 @@ export function RegisterPage() {
       <Paper sx={{ p: 4, width: 380 }}>
         <Stack alignItems="center" sx={{ mb: 3 }}><Logo /></Stack>
         <Typography variant="h6" sx={{ mb: 2, textAlign: 'center' }}>Registrace</Typography>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        {success ? (
-          <Alert severity="success">Účet vytvořen. Čeká na schválení administrátorem.</Alert>
-        ) : (
+
+        {inviteValid === null && (
+          <Stack alignItems="center" sx={{ py: 3 }}><CircularProgress /></Stack>
+        )}
+
+        {inviteValid === false && (
+          <Stack spacing={2}>
+            <Alert severity="error">{inviteError}</Alert>
+            <Link component={RouterLink} to="/login" variant="body2" align="center" display="block">
+              Zpět na přihlášení
+            </Link>
+          </Stack>
+        )}
+
+        {inviteValid === true && !success && (
           <form onSubmit={submit}>
             <Stack spacing={2}>
-              <TextField label="Jméno" value={displayName} onChange={e => setDisplayName(e.target.value)} required size="small" fullWidth />
-              <TextField label="Firemní email" type="email" value={email} onChange={e => setEmail(e.target.value)} required size="small" fullWidth helperText={`Povoleno: ${ALLOWED.map(d => '@' + d).join(', ')}`} />
-              <TextField label="Heslo" type="password" value={password} onChange={e => setPassword(e.target.value)} required size="small" fullWidth />
-              <Button type="submit" variant="contained" disabled={busy}>{busy ? 'Vytvářím účet…' : 'Vytvořit účet'}</Button>
-              <Typography variant="caption" align="center">
-                <Link component={RouterLink} to="/login">Zpět na přihlášení</Link>
-              </Typography>
+              <TextField label="Email" value={inviteEmail} disabled size="small" fullWidth />
+              <TextField
+                label="Jméno"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                required size="small" fullWidth autoFocus
+              />
+              <TextField
+                label="Heslo"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required size="small" fullWidth
+              />
+              {error && <Alert severity="error">{error}</Alert>}
+              <Button type="submit" variant="contained" disabled={busy}>
+                {busy ? 'Vytvářím účet…' : 'Vytvořit účet'}
+              </Button>
+              <Link component={RouterLink} to="/login" variant="caption" align="center" display="block">
+                Zpět na přihlášení
+              </Link>
             </Stack>
           </form>
+        )}
+
+        {success && (
+          <Alert severity="success">Účet byl vytvořen. Přihlašuji tě…</Alert>
         )}
       </Paper>
     </Box>

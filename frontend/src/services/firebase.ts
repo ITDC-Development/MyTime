@@ -2,14 +2,22 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 
-const config = {
+const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-export const app = initializeApp(config);
+const missingKeys = (Object.keys(firebaseConfig) as (keyof typeof firebaseConfig)[])
+  .filter((k) => !firebaseConfig[k]);
+if (missingKeys.length > 0) {
+  console.error('[Firebase] Missing env vars:', missingKeys.join(', '));
+}
+
+console.log('[Firebase] config:', firebaseConfig);
+
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const firestore = getFirestore(app);
 

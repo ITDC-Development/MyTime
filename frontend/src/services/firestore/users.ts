@@ -3,24 +3,24 @@ import { firestore } from '../firebase';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth } from '../firebase';
 
-export async function isFirstUser(): Promise<boolean> {
-  const snap = await getDocs(collection(firestore, 'users'));
-  return snap.empty;
-}
-
-export async function createAccount(email: string, password: string, displayName: string) {
+export async function createAccount(
+  email: string,
+  password: string,
+  displayName: string,
+  status: 'pending' | 'active' = 'pending',
+  approvedBy: string | null = null,
+) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(cred.user, { displayName });
-  const firstUser = await isFirstUser();
   await setDoc(doc(firestore, 'users', cred.user.uid), {
     email: email.toLowerCase(),
     displayName,
-    role: firstUser ? 'admin' : 'user',
-    status: firstUser ? 'active' : 'pending',
+    role: 'user',
+    status,
     jiraAccountId: null,
     createdAt: new Date().toISOString(),
-    approvedAt: firstUser ? new Date().toISOString() : null,
-    approvedBy: null,
+    approvedAt: status === 'active' ? new Date().toISOString() : null,
+    approvedBy,
     preferences: {
       showPauses: true,
       columns: {
@@ -29,6 +29,7 @@ export async function createAccount(email: string, password: string, displayName
         overview: ['user', 'date', 'period', 'issue', 'hours'],
       },
       lastSelectedUser: null,
+      exportPresets: [],
     },
   });
   return cred.user.uid;

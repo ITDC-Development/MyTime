@@ -13,8 +13,10 @@ import { PauseToggle } from '../components/common/PauseToggle';
 import { ColumnPicker } from '../components/common/ColumnPicker';
 import { WorklogTable } from '../components/reports/WorklogTable';
 import { ExportButtons } from '../components/export/ExportButtons';
+import { ExportPresetManager } from '../components/export/ExportPresetManager';
 import { setLocks } from '../services/firestore/locks';
 import { ColumnId } from '../types/export';
+import type { ExportPreset } from '../types/user';
 import dayjs from 'dayjs';
 
 export function OverviewPage() {
@@ -69,6 +71,24 @@ export function OverviewPage() {
 
   const [confirmExport, setConfirmExport] = useState<null | (() => void)>(null);
 
+  const presets: ExportPreset[] = preferences?.exportPresets ?? [];
+
+  const savePreset = (name: string) => {
+    const next: ExportPreset[] = [
+      ...presets,
+      { id: crypto.randomUUID(), name, columns: stored },
+    ];
+    update({ exportPresets: next });
+  };
+
+  const deletePreset = (id: string) => {
+    update({ exportPresets: presets.filter(p => p.id !== id) });
+  };
+
+  const loadPreset = (columns: ColumnId[]) => {
+    update({ columns: { ...preferences!.columns, overview: columns } });
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 1 }}>Přehledy</Typography>
@@ -86,6 +106,13 @@ export function OverviewPage() {
         <ColumnPicker
           selected={stored}
           onChange={cols => update({ columns: { ...preferences!.columns, overview: cols } })}
+        />
+        <ExportPresetManager
+          currentColumns={stored}
+          presets={presets}
+          onLoad={loadPreset}
+          onSave={savePreset}
+          onDelete={deletePreset}
         />
 
         {selected.length === 0 ? (

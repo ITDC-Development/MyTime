@@ -11,6 +11,7 @@ interface Props {
   rows: LinearWorklog[];
   columns: ColumnId[];
   isLocked: boolean;
+  showOvertime?: boolean;
   onEdit?: (row: LinearWorklog) => void;
   onHistory?: (row: LinearWorklog) => void;
 }
@@ -20,7 +21,7 @@ const LABELS: Record<ColumnId, string> = {
   sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas',
 };
 
-export function WorklogTable({ rows, columns, isLocked, onEdit, onHistory }: Props) {
+export function WorklogTable({ rows, columns, isLocked, showOvertime = false, onEdit, onHistory }: Props) {
   if (rows.length === 0) {
     return <Typography color="text.secondary" sx={{ py: 3 }}>Žádné worklogy v tomto období.</Typography>;
   }
@@ -35,11 +36,11 @@ export function WorklogTable({ rows, columns, isLocked, onEdit, onHistory }: Pro
       <TableBody>
         {rows.map((row, idx) => {
           const bg = row.isPause ? BRAND.cream
-            : row.isOvertime ? 'rgba(186,117,23,0.10)'
+            : (showOvertime && row.isOvertime) ? 'rgba(186,117,23,0.10)'
             : row.isEdited ? 'rgba(44,140,153,0.06)' : 'inherit';
           return (
             <TableRow key={`${row.worklogId}-${idx}`} sx={{ backgroundColor: bg }}>
-              {columns.map(c => <TableCell key={c}>{cellValue(row, c)}</TableCell>)}
+              {columns.map(c => <TableCell key={c}>{cellValue(row, c, showOvertime)}</TableCell>)}
               {(onEdit || onHistory) && (
                 <TableCell align="right">
                   {!row.isPause && !isLocked && onEdit && (
@@ -62,7 +63,7 @@ export function WorklogTable({ rows, columns, isLocked, onEdit, onHistory }: Pro
   );
 }
 
-function cellValue(row: LinearWorklog, col: ColumnId) {
+function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
   switch (col) {
     case 'user': return row.user;
     case 'date': return formatDateShort(row.date);
@@ -74,7 +75,7 @@ function cellValue(row: LinearWorklog, col: ColumnId) {
           {row.issueKey || '—'}
           {row.isEdited && <Box component="span" sx={{ ml: 1, fontSize: 11, color: 'secondary.main' }}>(upraveno)</Box>}
           {row.isManual && <Box component="span" sx={{ ml: 1, fontSize: 11, color: 'text.secondary' }}>(ruční)</Box>}
-          {row.isOvertime && <OvertimeBadge />}
+          {showOvertime && row.isOvertime && <OvertimeBadge />}
         </Box>
       );
     case 'parent': return row.parentKey ? `${row.parentKey} · ${row.parentSummary}` : '—';

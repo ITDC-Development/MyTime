@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Box, Typography, Paper, Stack } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
@@ -6,10 +6,9 @@ import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
 import { usePreferences } from '../hooks/usePreferences';
 import { currentMonth, monthLabel } from '../utils/dateUtils';
-import { filterPauses } from '../utils/pauseRules';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
-import { PauseToggle } from '../components/common/PauseToggle';
+import { ColumnPickerDropdown } from '../components/common/ColumnPickerDropdown';
 import { LockBadge } from '../components/common/LockBadge';
 import { LockButton } from '../components/reports/LockButton';
 import { WorklogTable } from '../components/reports/WorklogTable';
@@ -39,10 +38,8 @@ export function CompanyReportPage() {
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const { linear } = useWorklogs({ accountIds: selected, year, month });
-  const showPauses = preferences?.showPauses ?? true;
   const columns: ColumnId[] = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'hours'];
-
-  const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
+  const filtered = linear;
   const accountId = selected[0] ?? null;
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
 
@@ -62,7 +59,10 @@ export function CompanyReportPage() {
             const next = ids.slice(0, 1); setSelected(next); update({ lastSelectedUser: next[0] ?? null });
           }} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
-          <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
+          <ColumnPickerDropdown
+            selected={columns}
+            onChange={cols => update({ columns: { ...preferences!.columns, companyReport: cols } })}
+          />
         </Stack>
 
         {accountId ? (
@@ -71,6 +71,7 @@ export function CompanyReportPage() {
               rows={filtered}
               columns={columns}
               isLocked={isLocked || (!isAdmin && accountId !== ownAccount)}
+              showOvertime
               onEdit={r => setEditTarget(r)}
               onHistory={r => setHistoryTarget(r)}
             />

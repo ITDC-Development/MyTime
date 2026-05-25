@@ -11,6 +11,12 @@ export interface UserProfile {
   preferences: UserPreferences;
 }
 
+export interface ExportPreset {
+  id: string;
+  name: string;
+  columns: string[];
+}
+
 export interface UserPreferences {
   showPauses: boolean;
   columns: {
@@ -19,4 +25,5 @@ export interface UserPreferences {
     overview: string[];
   };
   lastSelectedUser: string | null;
+  exportPresets: ExportPreset[];
 }

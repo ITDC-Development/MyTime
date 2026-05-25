@@ -55,22 +55,31 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
   }
   await batch.commit();
 
-  // Absences
+  // Absences — expand multi-day entries into one document per calendar day
   const absences = await fetchAbsences(opts.from, opts.to);
   const absBatch = db().batch();
   let absWritten = 0;
   for (const a of absences) {
-    const ref = db().collection('absences').doc(String(a.id));
-    const absence: Absence = {
-      id: String(a.id),
-      user: a.username,
-      accountId: a.accountId,
-      type: a.type as Absence['type'],
-      date: a.start,
-      hours: a.hours ?? 8,
-    };
-    absBatch.set(ref, absence);
-    absWritten++;
+    const start = new Date(a.start);
+    const end = new Date(a.end ?? a.start);
+    const cur = new Date(start);
+    let dayIndex = 0;
+    while (cur <= end) {
+      const dayStr = cur.toISOString().slice(0, 10);
+      const ref = db().collection('absences').doc(`${a.id}_${dayIndex}`);
+      const absence: Absence = {
+        id: `${a.id}_${dayIndex}`,
+        user: a.username,
+        accountId: a.accountId,
+        type: a.type as Absence['type'],
+        date: dayStr,
+        hours: 8,
+      };
+      absBatch.set(ref, absence);
+      absWritten++;
+      dayIndex++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
   }
   await absBatch.commit();
 

@@ -69,7 +69,7 @@ export function useWorklogs({ accountIds, year, month }: Args) {
         started: r.started,
         seconds: e?.seconds ?? r.seconds,
         summary: e?.summary ?? r.summary,
-        issueKey: r.issueKey,
+        issueKey: e?.issueKey ?? r.issueKey,
         parentKey: e?.parentKey ?? r.parentKey,
         parentSummary: e?.parentSummary ?? r.parentSummary,
         components: e?.components ?? r.components,

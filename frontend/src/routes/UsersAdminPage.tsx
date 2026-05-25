@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Box, Typography, Paper, Stack, Table, TableHead, TableBody, TableRow, TableCell, IconButton, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert } from '@mui/material';
-import { Check, Block, LockOpen, Delete, ArrowUpward, ArrowDownward } from '@mui/icons-material';
+import { Box, Typography, Paper, Stack, Table, TableHead, TableBody, TableRow, TableCell, IconButton, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert, Snackbar } from '@mui/material';
+import { Check, Block, LockOpen, Delete, ArrowUpward, ArrowDownward, PersonAdd, ManageAccounts } from '@mui/icons-material';
+import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useUsers } from '../hooks/useUsers';
 import { useAuth } from '../contexts/AuthContext';
-import { api } from '../services/api';
+import { firestore } from '../services/firebase';
+import { InviteUserDialog } from '../components/admin/InviteUserDialog';
+import { AssignJiraDialog } from '../components/admin/AssignJiraDialog';
 import type { UserProfile } from '../types/user';
 import dayjs from 'dayjs';
 
@@ -11,6 +14,10 @@ export function UsersAdminPage() {
   const { profile } = useAuth();
   const { users } = useUsers();
   const [confirm, setConfirm] = useState<{ user: UserProfile; action: string; run: () => Promise<void> } | null>(null);
+
+  const [error, setError] = useState<string | null>(null);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [jiraTarget, setJiraTarget] = useState<UserProfile | null>(null);
 
   const adminCount = useMemo(
     () => users.filter(u => u.role === 'admin' && u.status === 'active').length,
@@ -22,11 +29,24 @@ export function UsersAdminPage() {
   const blocked = users.filter(u => u.status === 'blocked');
 
   const updateUser = async (uid: string, patch: { role?: string; status?: string }) => {
-    await api(`/users/${uid}`, { method: 'PATCH', body: JSON.stringify(patch) });
+    try {
+      const data: Record<string, unknown> = { ...patch };
+      if (patch.status === 'active') {
+        data.approvedAt = new Date().toISOString();
+        data.approvedBy = profile?.uid ?? null;
+      }
+      await updateDoc(doc(firestore, 'users', uid), data);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const deleteUser = async (uid: string) => {
-    await api(`/users/${uid}`, { method: 'DELETE' });
+    try {
+      await deleteDoc(doc(firestore, 'users', uid));
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const askConfirm = (user: UserProfile, action: string, run: () => Promise<void>) => {
@@ -42,6 +62,17 @@ export function UsersAdminPage() {
       <TableCell>{u.displayName}</TableCell>
       <TableCell>{dayjs(u.createdAt).format('DD. MM. YYYY')}</TableCell>
       <TableCell><Chip size="small" label={u.role === 'admin' ? 'Admin' : 'User'} color={u.role === 'admin' ? 'secondary' : 'default'} /></TableCell>
+      <TableCell>
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          {u.jiraAccountId
+            ? <Chip size="small" label={u.jiraAccountId} variant="outlined" sx={{ fontFamily: 'monospace', fontSize: 11 }} />
+            : <Typography variant="caption" color="text.disabled">—</Typography>
+          }
+          <IconButton size="small" title="Přiřadit Jira účet" onClick={() => setJiraTarget(u)}>
+            <ManageAccounts fontSize="small" />
+          </IconButton>
+        </Stack>
+      </TableCell>
       <TableCell align="right">
         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
           {sectionType === 'pending' && (
@@ -91,9 +122,14 @@ export function UsersAdminPage() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 1 }}>Správa uživatelů</Typography>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
+        <Typography variant="h4">Správa uživatelů</Typography>
+        <Button variant="contained" startIcon={<PersonAdd />} onClick={() => setInviteOpen(true)}>
+          Pozvat uživatele
+        </Button>
+      </Stack>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Schvalování registrací, role a blokování přístupu.
+        Pozvánky, role a blokování přístupu.
       </Typography>
 
       {pending.length > 0 && (
@@ -101,7 +137,7 @@ export function UsersAdminPage() {
           <Typography variant="h6" sx={{ mb: 2 }}>Čekající na schválení ({pending.length})</Typography>
           <Table size="small">
             <TableHead><TableRow>
-              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell align="right">Akce</TableCell>
+              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell align="right">Akce</TableCell>
             </TableRow></TableHead>
             <TableBody>{pending.map(u => renderRow(u, 'pending'))}</TableBody>
           </Table>
@@ -123,12 +159,20 @@ export function UsersAdminPage() {
           <Typography variant="h6" sx={{ mb: 2 }}>Zablokovaní ({blocked.length})</Typography>
           <Table size="small">
             <TableHead><TableRow>
-              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell align="right">Akce</TableCell>
+              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell align="right">Akce</TableCell>
             </TableRow></TableHead>
             <TableBody>{blocked.map(u => renderRow(u, 'blocked'))}</TableBody>
           </Table>
         </Paper>
       )}
+
+      <InviteUserDialog open={inviteOpen} onClose={() => setInviteOpen(false)} />
+      <AssignJiraDialog open={Boolean(jiraTarget)} user={jiraTarget} onClose={() => setJiraTarget(null)} />
+
+      <Snackbar open={Boolean(error)} autoHideDuration={5000} onClose={() => setError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert severity="error" onClose={() => setError(null)}>{error}</Alert>
+      </Snackbar>
 
       <Dialog open={Boolean(confirm)} onClose={() => setConfirm(null)}>
         <DialogTitle>Potvrzení akce</DialogTitle>

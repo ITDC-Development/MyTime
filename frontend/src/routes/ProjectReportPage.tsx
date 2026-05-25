@@ -11,6 +11,7 @@ import { filterPauses } from '../utils/pauseRules';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
 import { PauseToggle } from '../components/common/PauseToggle';
+import { ColumnPickerDropdown } from '../components/common/ColumnPickerDropdown';
 import { LockBadge } from '../components/common/LockBadge';
 import { LockButton } from '../components/reports/LockButton';
 import { WorklogTable } from '../components/reports/WorklogTable';
@@ -62,6 +63,11 @@ export function ProjectReportPage() {
           <UserSelect users={users} value={selected} onChange={handleSelectionChange} />
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
+          <ColumnPickerDropdown
+            selected={columns}
+            onChange={cols => update({ columns: { ...preferences!.columns, projectReport: cols } })}
+            exclude={['overtime']}
+          />
         </Stack>
 
         {accountId ? (

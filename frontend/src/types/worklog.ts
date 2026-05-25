@@ -19,6 +19,7 @@ export interface EditedWorklog {
   user: string;
   accountId: string;
   summary?: string;
+  issueKey?: string;
   parentKey?: string;
   parentSummary?: string;
   components?: string[];

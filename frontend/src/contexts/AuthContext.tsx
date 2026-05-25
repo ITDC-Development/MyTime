@@ -25,6 +25,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!u) {
         setProfile(null);
         setLoading(false);
+      } else {
+        setLoading(true); // čekáme na načtení profilu přes onSnapshot
       }
     });
     return unsub;

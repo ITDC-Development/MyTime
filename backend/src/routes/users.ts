@@ -5,6 +5,46 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
+router.post('/', authenticate, requireAdmin, async (req: AuthedRequest, res) => {
+  const { email, displayName } = req.body as { email: string; displayName: string };
+  if (!email || !displayName) {
+    return res.status(400).json({ error: 'email a displayName jsou povinné' });
+  }
+  try {
+    const userRecord = await authAdmin().createUser({
+      email: email.toLowerCase(),
+      displayName,
+      emailVerified: false,
+    });
+    await db().collection('users').doc(userRecord.uid).set({
+      email: email.toLowerCase(),
+      displayName,
+      role: 'user',
+      status: 'active',
+      jiraAccountId: null,
+      createdAt: new Date().toISOString(),
+      approvedAt: new Date().toISOString(),
+      approvedBy: req.user!.uid,
+      preferences: {
+        showPauses: true,
+        columns: {
+          projectReport: ['date', 'period', 'issue', 'hours'],
+          companyReport: ['date', 'period', 'issue', 'hours'],
+          overview: ['user', 'date', 'period', 'issue', 'hours'],
+        },
+        lastSelectedUser: null,
+      },
+    });
+    res.json({ uid: userRecord.uid });
+  } catch (err: any) {
+    if (err.code === 'auth/email-already-exists') {
+      return res.status(409).json({ error: 'Uživatel s tímto emailem již existuje.' });
+    }
+    logger.error('Vytvoření uživatele selhalo', { err: String(err) });
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 router.get('/', authenticate, requireAdmin, async (_req, res) => {
   const snap = await db().collection('users').orderBy('createdAt', 'desc').get();
   res.json(snap.docs.map(d => ({ uid: d.id, ...d.data() })));

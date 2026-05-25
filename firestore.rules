@@ -30,12 +30,20 @@ service cloud.firestore {
       return email.matches('.*@(it-dc\\.cz|it-dc\\.sk)$');
     }
 
+    // Pozvánky – admin vytváří, kdokoliv může číst (token je tajný UUID), pozvaný uživatel označí jako použitou
+    match /invites/{token} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
     // Users collection
     match /users/{userId} {
       // Self-read; admin can read all
       allow read: if isSelf(userId) || isAdmin();
-      // Self-create only with allowed domain; first user auto-admin via Cloud Function
-      allow create: if isSelf(userId) && isAllowedDomain(request.resource.data.email);
+      // Vytvoření účtu povolen jen sobě – token pozvánky je ověřen klientsky
+      allow create: if isSelf(userId);
       // Self-update of preferences only; admin can update role/status
       allow update: if
         (isSelf(userId) &&

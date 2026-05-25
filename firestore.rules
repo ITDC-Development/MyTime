@@ -1,0 +1,96 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function userProfile(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+             userProfile(request.auth.uid).role == 'admin' &&
+             userProfile(request.auth.uid).status == 'active';
+    }
+
+    function isActiveUser() {
+      return isAuthenticated() &&
+             userProfile(request.auth.uid).status == 'active';
+    }
+
+    function isSelf(uid) {
+      return request.auth.uid == uid;
+    }
+
+    function isAllowedDomain(email) {
+      return email.matches('.*@(it-dc\\.cz|it-dc\\.sk)$');
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Self-read; admin can read all
+      allow read: if isSelf(userId) || isAdmin();
+      // Self-create only with allowed domain; first user auto-admin via Cloud Function
+      allow create: if isSelf(userId) && isAllowedDomain(request.resource.data.email);
+      // Self-update of preferences only; admin can update role/status
+      allow update: if
+        (isSelf(userId) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['preferences', 'displayName'])) ||
+        isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Worklogs (raw + edited + manual): only active users can read; admin writes all,
+    // user can edit only own worklogs in unlocked months
+    match /worklogs_raw/{worklogId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /worklogs_edited/{worklogId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser();
+    }
+
+    match /manual_worklogs/{worklogId} {
+      allow read: if isActiveUser();
+      allow create, update: if isActiveUser();
+      allow delete: if isActiveUser();
+    }
+
+    // Absences read-only for active users; backend writes
+    match /absences/{absenceId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    // Locks: read all active, write admin
+    match /locks/{lockId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser();
+    }
+
+    // Audit log: read all active, write all active (system-driven via app)
+    match /audit_log/{logId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+    }
+
+    // Sync log: admin only
+    match /sync_log/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Sync settings: admin only
+    match /sync_settings/{settingId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+  }
+}

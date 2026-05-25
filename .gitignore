@@ -1,0 +1,32 @@
+# Závislosti
+node_modules/
+.pnp/
+.pnp.js
+
+# Build výstupy
+dist/
+build/
+.next/
+
+# Lokální env
+.env
+.env.local
+
+# Logy
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Firebase
+.firebase/
+emulator-data/
+firebase-debug.log
+
+# OS
+.DS_Store
+Thumbs.db

@@ -17,7 +17,7 @@ interface Props {
 }
 
 const LABELS: Record<ColumnId, string> = {
-  user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', parent: 'Parent',
+  user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', name: 'Název', parent: 'Parent',
   sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas',
 };
 
@@ -78,11 +78,12 @@ function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
           {showOvertime && row.isOvertime && <OvertimeBadge />}
         </Box>
       );
+    case 'name': return row.isPause ? '—' : (row.summary || '—');
     case 'parent': return row.parentKey ? `${row.parentKey} · ${row.parentSummary}` : '—';
     case 'sprint': return row.sprint || '—';
     case 'component': return row.components.join(', ') || '—';
     case 'hours': return row.isPause ? '—' : formatHours(row.hours);
-    case 'comment': return row.comment || row.summary || '—';
+    case 'comment': return row.comment || '—';
     case 'overtime': return row.isOvertime ? formatHours(row.hours) : '—';
   }
 }

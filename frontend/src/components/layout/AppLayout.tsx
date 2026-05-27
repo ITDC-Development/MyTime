@@ -6,7 +6,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
       <Sidebar />
-      <Box component="main" sx={{ flex: 1, ml: `${SIDEBAR_WIDTH}px`, px: 2, py: 3 }}>
+      <Box component="main" sx={{ flex: 1, ml: '24px', pl: 0.5, pr: 2, py: 2 }}>
         {children}
       </Box>
     </Box>

@@ -6,7 +6,7 @@ import { linearizeMonth, SourceWorklog } from '../utils/linearTime';
 import type { RawWorklog, EditedWorklog, ManualWorklog, LinearWorklog } from '../types/worklog';
 
 interface Args {
-  accountIds: string[];
+  accountIds: string[] | null; // null = fetch all (admin)
   year: number;
   month: number;
 }
@@ -20,19 +20,16 @@ export function useWorklogs({ accountIds, year, month }: Args) {
   const { from, to } = useMemo(() => monthRange(year, month), [year, month]);
 
   useEffect(() => {
-    if (accountIds.length === 0) { setRaw([]); setLoading(false); return; }
-    const q = query(
-      collection(firestore, 'worklogs_raw'),
-      where('accountId', 'in', accountIds),
-      where('date', '>=', from),
-      where('date', '<=', to)
-    );
+    if (accountIds !== null && accountIds.length === 0) { setRaw([]); setLoading(false); return; }
+    const q = accountIds === null
+      ? query(collection(firestore, 'worklogs_raw'), where('date', '>=', from), where('date', '<=', to))
+      : query(collection(firestore, 'worklogs_raw'), where('accountId', 'in', accountIds), where('date', '>=', from), where('date', '<=', to));
     const unsub = onSnapshot(q, (snap) => {
       setRaw(snap.docs.map((d) => d.data() as RawWorklog));
       setLoading(false);
     });
     return unsub;
-  }, [accountIds.join(','), from, to]);
+  }, [accountIds === null ? 'ALL' : accountIds.join(','), from, to]);
 
   useEffect(() => {
     const unsub = onSnapshot(collection(firestore, 'worklogs_edited'), (snap) => {
@@ -44,17 +41,14 @@ export function useWorklogs({ accountIds, year, month }: Args) {
   }, []);
 
   useEffect(() => {
-    if (accountIds.length === 0) { setManual([]); return; }
-    const q = query(
-      collection(firestore, 'manual_worklogs'),
-      where('accountId', 'in', accountIds),
-      where('date', '>=', from),
-      where('date', '<=', to)
-    );
+    if (accountIds !== null && accountIds.length === 0) { setManual([]); return; }
+    const q = accountIds === null
+      ? query(collection(firestore, 'manual_worklogs'), where('date', '>=', from), where('date', '<=', to))
+      : query(collection(firestore, 'manual_worklogs'), where('accountId', 'in', accountIds), where('date', '>=', from), where('date', '<=', to));
     return onSnapshot(q, (snap) => {
       setManual(snap.docs.map((d) => d.data() as ManualWorklog));
     });
-  }, [accountIds.join(','), from, to]);
+  }, [accountIds === null ? 'ALL' : accountIds.join(','), from, to]);
 
   const linear: LinearWorklog[] = useMemo(() => {
     // Per uživatel a den linearizovat zvlášť, aby pauzy a přesčas seděly

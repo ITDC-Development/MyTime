@@ -27,18 +27,28 @@ export function CompanyReportPage() {
 
   const isAdmin = profile?.role === 'admin';
   const ownAccount = profile?.jiraAccountId ?? null;
-  const [selected, setSelected] = useState<string[]>(
-    !isAdmin && ownAccount ? [ownAccount] : preferences?.lastSelectedUser ? [preferences.lastSelectedUser] : []
-  );
+  const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
 
   useEffect(() => {
     if (!isAdmin && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
   }, [isAdmin, ownAccount]);
 
+  const accountIds = isAdmin && selected.length === 0 ? null : selected;
+
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
-  const { linear } = useWorklogs({ accountIds: selected, year, month });
-  const columns: ColumnId[] = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'hours'];
+  const { linear } = useWorklogs({ accountIds, year, month });
+
+  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isAdmin && accountIds === null && linear.length > 0) {
+      setJiraUsers(
+        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
+  }, [linear, accountIds, isAdmin]);
+  const columns: ColumnId[] = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
   const filtered = linear;
   const accountId = selected[0] ?? null;
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
@@ -55,7 +65,7 @@ export function CompanyReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin && <UserSelect users={users} value={selected} onChange={ids => {
+          {isAdmin && <UserSelect jiraUsers={jiraUsers} value={selected} onChange={ids => {
             const next = ids.slice(0, 1); setSelected(next); update({ lastSelectedUser: next[0] ?? null });
           }} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
@@ -65,12 +75,12 @@ export function CompanyReportPage() {
           />
         </Stack>
 
-        {accountId ? (
+        {(accountId || (isAdmin && selected.length === 0)) ? (
           <>
             <WorklogTable
               rows={filtered}
               columns={columns}
-              isLocked={isLocked || (!isAdmin && accountId !== ownAccount)}
+              isLocked={isLocked || !isAdmin}
               showOvertime
               onEdit={r => setEditTarget(r)}
               onHistory={r => setHistoryTarget(r)}

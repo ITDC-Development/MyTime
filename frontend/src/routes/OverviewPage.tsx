@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
@@ -29,9 +29,21 @@ export function OverviewPage() {
   const [selected, setSelected] = useState<string[]>([]);
   const [pending, setPending] = useState<null | (() => void)>(null);
 
-  const { linear } = useWorklogs({ accountIds: selected, year, month });
+  const isAdmin = profile?.role === 'admin';
+  const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const { linear } = useWorklogs({ accountIds, year, month });
   const showPauses = preferences?.showPauses ?? true;
-  const stored = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'hours'];
+  const stored = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'name', 'hours'];
+
+  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isAdmin && accountIds === null && linear.length > 0) {
+      setJiraUsers(
+        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
+  }, [linear, accountIds, isAdmin]);
 
   const columns = useMemo(() => {
     if (selected.length > 1 && !stored.includes('user')) return ['user' as ColumnId, ...stored];
@@ -98,7 +110,10 @@ export function OverviewPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          <UserSelect users={users} value={selected} onChange={setSelected} multiple label="Uživatelé" />
+          {isAdmin
+            ? <UserSelect jiraUsers={jiraUsers} value={selected} onChange={setSelected} multiple label="Uživatelé" />
+            : <UserSelect users={users} value={selected} onChange={setSelected} multiple label="Uživatelé" />
+          }
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
         </Stack>
@@ -115,7 +130,7 @@ export function OverviewPage() {
           onDelete={deletePreset}
         />
 
-        {selected.length === 0 ? (
+        {!isAdmin && selected.length === 0 ? (
           <Alert severity="info">Vyber alespoň jednoho uživatele pro zobrazení a export.</Alert>
         ) : (
           <>
@@ -159,7 +174,7 @@ export function OverviewPage() {
 }
 
 function labelOf(c: ColumnId): string {
-  return { user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', parent: 'Parent',
+  return { user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', name: 'Název', parent: 'Parent',
     sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas' }[c];
 }
 
@@ -168,7 +183,8 @@ function renderForExport(r: { user: string; date: string; startMinutes: number; 
     case 'user': return r.user;
     case 'date': return dayjs(r.date).format('DD. MM. YYYY');
     case 'period': return formatPeriod(r.startMinutes, r.endMinutes);
-    case 'issue': return r.isPause ? r.summary : `${r.issueKey || ''}${r.issueKey ? ' · ' : ''}${r.summary}`.trim();
+    case 'issue': return r.isPause ? r.summary : (r.issueKey || '');
+    case 'name': return r.isPause ? '' : r.summary;
     case 'parent': return r.parentKey ? `${r.parentKey} ${r.parentSummary}` : '';
     case 'sprint': return r.sprint;
     case 'component': return r.components.join(', ');

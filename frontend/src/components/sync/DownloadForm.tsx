@@ -13,11 +13,12 @@ export function DownloadForm() {
   const run = async () => {
     setBusy(true); setError(null); setResult(null);
     try {
-      const r = await api<{ worklogsWritten: number; worklogsSkipped: number; absencesWritten: number }>('/sync/manual', {
+      const r = await api<{ worklogsWritten: number; worklogsSkipped: number; absencesWritten: number; atError?: string }>('/sync/manual', {
         method: 'POST',
         body: JSON.stringify(from && to ? { from, to } : {}),
       });
       setResult(`Hotovo: ${r.worklogsWritten} worklogů uloženo, ${r.worklogsSkipped} přeskočeno, ${r.absencesWritten} absencí.`);
+      if (r.atError) setError(`Activity Timeline chyba: ${r.atError}`);
     } catch (e) {
       setError(String(e));
     } finally {

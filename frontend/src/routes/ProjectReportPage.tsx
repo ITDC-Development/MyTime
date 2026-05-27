@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Box, Typography, Paper, Stack, Button } from '@mui/material';
 import { Add } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
@@ -23,19 +23,31 @@ import type { ColumnId } from '../types/export';
 
 export function ProjectReportPage() {
   const { profile } = useAuth();
+  const isAdmin = profile?.role === 'admin';
   const { users } = useUsers();
   const { preferences, update } = usePreferences();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
   const [month, setMonth] = useState(curM);
-  const [selected, setSelected] = useState<string[]>(preferences?.lastSelectedUser ? [preferences.lastSelectedUser] : []);
+  const [selected, setSelected] = useState<string[]>(!isAdmin && preferences?.lastSelectedUser ? [preferences.lastSelectedUser] : []);
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
 
-  const { linear } = useWorklogs({ accountIds: selected, year, month });
+  const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const { linear } = useWorklogs({ accountIds, year, month });
+
+  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isAdmin && accountIds === null && linear.length > 0) {
+      setJiraUsers(
+        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
+  }, [linear, accountIds, isAdmin]);
   const showPauses = preferences?.showPauses ?? true;
-  const columns: ColumnId[] = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'hours'];
+  const columns: ColumnId[] = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
 
   const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
   const accountId = selected[0] ?? null;
@@ -60,7 +72,10 @@ export function ProjectReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          <UserSelect users={users} value={selected} onChange={handleSelectionChange} />
+          {isAdmin
+            ? <UserSelect jiraUsers={jiraUsers} value={selected} onChange={handleSelectionChange} />
+            : <UserSelect users={users} value={selected} onChange={handleSelectionChange} />
+          }
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
           <ColumnPickerDropdown
@@ -70,17 +85,17 @@ export function ProjectReportPage() {
           />
         </Stack>
 
-        {accountId ? (
+        {(accountId || (isAdmin && selected.length === 0)) ? (
           <>
             <WorklogTable
               rows={filtered}
               columns={columns}
-              isLocked={isLocked}
+              isLocked={isLocked || !isAdmin}
               onEdit={r => setEditTarget(r)}
               onHistory={r => setHistoryTarget(r)}
             />
             <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-              {!isLocked && (
+              {isAdmin && !isLocked && (
                 <Button size="small" variant="outlined" startIcon={<Add />} onClick={() => setManualOpen(true)}>
                   Přidat ruční záznam
                 </Button>

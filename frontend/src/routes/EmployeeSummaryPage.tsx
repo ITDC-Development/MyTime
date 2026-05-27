@@ -1,35 +1,59 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Typography, Paper, Stack, Grid, Card, CardContent } from '@mui/material';
+import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Table, TableHead, TableBody, TableRow, TableCell, Chip, Alert } from '@mui/material';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
-import { useUsers } from '../hooks/useUsers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
-import { currentMonth, monthRange } from '../utils/dateUtils';
+import { currentMonth, monthRange, formatDateFull } from '../utils/dateUtils';
 import { formatHours } from '../utils/formatters';
 import { overtimeStats, totalWorkedHours } from '../utils/overtime';
 import type { Absence } from '../types/jira';
 
+const ABSENCE_LABEL: Record<Absence['type'], string> = {
+  VACATION: 'Dovolená',
+  SICK_LEAVE: 'Nemoc',
+  DAY_OFF: 'Volno',
+  HOLIDAY: 'Svátek',
+};
+
+const ABSENCE_COLOR: Record<Absence['type'], 'primary' | 'error' | 'warning' | 'default'> = {
+  VACATION: 'primary',
+  SICK_LEAVE: 'error',
+  DAY_OFF: 'warning',
+  HOLIDAY: 'default',
+};
+
 export function EmployeeSummaryPage() {
   const { profile } = useAuth();
-  const { users } = useUsers();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
   const [month, setMonth] = useState(curM);
 
   const isAdmin = profile?.role === 'admin';
   const ownAccount = profile?.jiraAccountId ?? null;
-  const [selected, setSelected] = useState<string[]>(ownAccount ? [ownAccount] : []);
+  const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
 
   useEffect(() => {
     if (!isAdmin && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
   }, [isAdmin, ownAccount]);
 
   const accountId = selected[0] ?? null;
-  const { linear } = useWorklogs({ accountIds: selected, year, month });
+  const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const { linear } = useWorklogs({ accountIds, year, month });
+
+  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
+  useEffect(() => {
+    if (isAdmin && accountIds === null && linear.length > 0) {
+      setJiraUsers(
+        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+    }
+  }, [linear, accountIds, isAdmin]);
   const [absences, setAbsences] = useState<Absence[]>([]);
+  const [absenceError, setAbsenceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!accountId) { setAbsences([]); return; }
@@ -40,10 +64,29 @@ export function EmployeeSummaryPage() {
       where('date', '>=', from),
       where('date', '<=', to)
     );
-    return onSnapshot(q, snap => {
-      setAbsences(snap.docs.map(d => d.data() as Absence));
-    });
+    return onSnapshot(q,
+      snap => {
+        setAbsenceError(null);
+        setAbsences(snap.docs.map(d => d.data() as Absence));
+      },
+      err => setAbsenceError(`Firestore chyba: ${err.message}`)
+    );
   }, [accountId, year, month]);
+
+  const expectedHours = useMemo(() => {
+    const { from, to } = monthRange(year, month);
+    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    let workingDays = 0;
+    const cur = new Date(from + 'T00:00:00Z');
+    const end = new Date(to + 'T00:00:00Z');
+    while (cur <= end) {
+      const dow = cur.getUTCDay();
+      const dateStr = cur.toISOString().slice(0, 10);
+      if (dow !== 0 && dow !== 6 && !holidayDates.has(dateStr)) workingDays++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return workingDays * 8;
+  }, [year, month, absences]);
 
   const stats = useMemo(() => {
     const ot = overtimeStats(linear);
@@ -53,7 +96,6 @@ export function EmployeeSummaryPage() {
       daysWithOvertime: ot.daysWithOvertime,
       vacationDays: absences.filter(a => a.type === 'VACATION').length,
       sickDays: absences.filter(a => a.type === 'SICK_LEAVE').length,
-      dayOffDays: absences.filter(a => a.type === 'DAY_OFF').length,
     };
   }, [linear, absences]);
 
@@ -66,19 +108,54 @@ export function EmployeeSummaryPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 3 }} alignItems={{ md: 'center' }}>
-          {isAdmin && <UserSelect users={users} value={selected} onChange={ids => setSelected(ids.slice(0, 1))} />}
+          {isAdmin && <UserSelect jiraUsers={jiraUsers} value={selected} onChange={ids => setSelected(ids.slice(0, 1))} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
         </Stack>
 
+        {absenceError && (
+          <Alert severity="error" sx={{ mb: 2 }}>{absenceError}</Alert>
+        )}
+
         {accountId ? (
-          <Grid container spacing={2}>
-            <Metric label="Celkem odpracováno" value={`${formatHours(stats.totalHours)} h`} />
-            <Metric label="Dovolená" value={`${stats.vacationDays} dní`} />
-            <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
-            <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
-            <Metric label="Nemoc" value={`${stats.sickDays} dní`} />
-            <Metric label="Volno" value={`${stats.dayOffDays} dní`} />
-          </Grid>
+          <>
+            <Grid container spacing={2}>
+              <Metric label="Odpracováno / Fond" value={`${formatHours(stats.totalHours)} h / ${formatHours(expectedHours)} h`} />
+              <Metric label="Dovolená" value={`${stats.vacationDays} dní`} />
+              <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
+              <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
+              <Metric label="Nemoc" value={`${stats.sickDays} dní`} />
+            </Grid>
+
+            {absences.length > 0 && (
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" sx={{ mb: 1, fontWeight: 600 }}>
+                  Absence v tomto měsíci
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Datum</TableCell>
+                      <TableCell>Typ</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {[...absences].sort((a, b) => a.date.localeCompare(b.date)).map(a => (
+                      <TableRow key={a.id}>
+                        <TableCell>{formatDateFull(a.date)}</TableCell>
+                        <TableCell>
+                          <Chip
+                            label={ABSENCE_LABEL[a.type]}
+                            color={ABSENCE_COLOR[a.type]}
+                            size="small"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            )}
+          </>
         ) : (
           <Typography color="text.secondary">
             {isAdmin ? 'Vyber zaměstnance.' : 'Tvůj Jira účet zatím nebyl spárován.'}

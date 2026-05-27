@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Box, Typography, Paper, Table, TableHead, TableBody, TableRow, TableCell, Stack, TextField, MenuItem } from '@mui/material';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
@@ -21,6 +21,13 @@ export function HistoryPage() {
 
   const months = Array.from(new Set(entries.map(e => e.changedAt.slice(0, 7)))).sort().reverse();
 
+  const employeesInLog = useMemo(() => {
+    const map = new Map<string, string>();
+    users.filter(u => u.jiraAccountId).forEach(u => map.set(u.jiraAccountId!, u.displayName));
+    entries.forEach(e => { if (e.accountId && e.user && !map.has(e.accountId)) map.set(e.accountId, e.user); });
+    return Array.from(map.entries()).map(([accountId, name]) => ({ accountId, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [entries, users]);
+
   const filtered = entries.filter(e =>
     (accountFilter === 'all' || e.accountId === accountFilter) &&
     (monthFilter === 'all' || e.changedAt.startsWith(monthFilter))
@@ -37,7 +44,7 @@ export function HistoryPage() {
         <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
           <TextField select size="small" label="Zaměstnanec" value={accountFilter} onChange={e => setAccountFilter(e.target.value)} sx={{ minWidth: 200 }}>
             <MenuItem value="all">Všichni</MenuItem>
-            {users.filter(u => u.jiraAccountId).map(u => <MenuItem key={u.uid} value={u.jiraAccountId!}>{u.displayName}</MenuItem>)}
+            {employeesInLog.map(u => <MenuItem key={u.accountId} value={u.accountId}>{u.name}</MenuItem>)}
           </TextField>
           <TextField select size="small" label="Měsíc" value={monthFilter} onChange={e => setMonthFilter(e.target.value)} sx={{ minWidth: 140 }}>
             <MenuItem value="all">Vše</MenuItem>

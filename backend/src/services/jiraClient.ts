@@ -1,10 +1,9 @@
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { logger } from '../utils/logger';
 import type { JiraWorklogResponse } from '../types/jira';
 
 const USE_MOCK = process.env.USE_MOCK_DATA === 'true';
 
-// Mock data pro vývoj bez Jira přístupu
 function generateMockWorklogs(from: string, to: string): JiraWorklogResponse[] {
   const start = new Date(from);
   const end = new Date(to);
@@ -22,7 +21,7 @@ function generateMockWorklogs(from: string, to: string): JiraWorklogResponse[] {
   const result: JiraWorklogResponse[] = [];
   let wid = 1000;
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-    if (d.getDay() === 0 || d.getDay() === 6) continue; // víkend přeskočit
+    if (d.getDay() === 0 || d.getDay() === 6) continue;
     for (const emp of employees) {
       const numEntries = 2 + Math.floor(Math.random() * 3);
       let startHour = 8 + Math.floor(Math.random() * 2);
@@ -52,47 +51,136 @@ function generateMockWorklogs(from: string, to: string): JiraWorklogResponse[] {
   return result;
 }
 
+function makeJiraClient(baseUrl: string, email: string, token: string): AxiosInstance {
+  return axios.create({
+    baseURL: baseUrl,
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${email}:${token}`).toString('base64')}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+  });
+}
+
+export function splitIntoMonths(from: string, to: string): { from: string; to: string }[] {
+  const chunks: { from: string; to: string }[] = [];
+  const start = new Date(from + 'T00:00:00Z');
+  const end = new Date(to + 'T00:00:00Z');
+  let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1));
+  while (cur <= end) {
+    const chunkFrom = cur < start ? from : cur.toISOString().slice(0, 10);
+    const monthEnd = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 0));
+    const chunkTo = (monthEnd < end ? monthEnd : end).toISOString().slice(0, 10);
+    chunks.push({ from: chunkFrom, to: chunkTo });
+    cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1));
+  }
+  return chunks;
+}
+
+async function fetchAllIssuesForRange(client: AxiosInstance, from: string, to: string): Promise<any[]> {
+  const PAGE_SIZE = 100;
+  const issues: any[] = [];
+  let nextPageToken: string | undefined;
+
+  while (true) {
+    try {
+      const body: Record<string, any> = {
+        jql: `worklogDate >= "${from}" AND worklogDate <= "${to}"`,
+        fields: ['summary', 'components', 'parent'],
+        maxResults: PAGE_SIZE,
+      };
+      if (nextPageToken) body.nextPageToken = nextPageToken;
+
+      const res = await client.post('/rest/api/3/search/jql', body);
+      const page: any[] = res.data?.issues ?? [];
+      issues.push(...page);
+      nextPageToken = res.data?.nextPageToken ?? undefined;
+      if (page.length === 0 || !nextPageToken) break;
+    } catch (err: any) {
+      logger.error('Jira search selhal', {
+        status: err.response?.status,
+        body: JSON.stringify(err.response?.data).slice(0, 500),
+        from, to,
+      });
+      throw err;
+    }
+  }
+  return issues;
+}
+
+async function fetchAllWorklogsForIssue(client: AxiosInstance, issueKey: string): Promise<any[]> {
+  const PAGE_SIZE = 5000;
+  const worklogs: any[] = [];
+  let startAt = 0;
+
+  while (true) {
+    try {
+      const res = await client.get(`/rest/api/3/issue/${issueKey}/worklog`, {
+        params: { startAt, maxResults: PAGE_SIZE },
+      });
+      const page: any[] = res.data?.worklogs ?? [];
+      const total: number = res.data?.total ?? 0;
+      worklogs.push(...page);
+      startAt += page.length;
+      if (startAt >= total || page.length === 0) break;
+    } catch (err: any) {
+      logger.warn('Načítání worklogů selhalo', { issue: issueKey, status: err.response?.status });
+      break;
+    }
+  }
+  return worklogs;
+}
+
 export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraWorklogResponse[]> {
   if (USE_MOCK || !process.env.JIRA_API_TOKEN) {
     logger.info('Načítám mock Jira worklogy', { from, to });
     return generateMockWorklogs(from, to);
   }
 
-  const baseUrl = process.env.JIRA_BASE_URL!;
-  const email = process.env.JIRA_EMAIL!;
-  const token = process.env.JIRA_API_TOKEN!;
-  const auth = Buffer.from(`${email}:${token}`).toString('base64');
+  const baseUrl = process.env.JIRA_BASE_URL!.trim();
+  const email = process.env.JIRA_EMAIL!.trim();
+  const token = process.env.JIRA_API_TOKEN!.trim();
+  const client = makeJiraClient(baseUrl, email, token);
 
-  // Reálné volání Jira REST API
-  // Pozn.: tohle je zjednodušená integrace, produkčně by se použila JQL search
-  // a paginace přes /rest/api/3/search/worklog s expanded fields.
-  const url = `${baseUrl}/rest/api/3/search?jql=worklogDate >= "${from}" AND worklogDate <= "${to}"&fields=worklog,summary,components,parent,sprint`;
-  const response = await axios.get(url, {
-    headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
-  });
+  const chunks = splitIntoMonths(from, to);
+  logger.info('Sync rozdělen do měsíčních chunků', { chunks: chunks.length, from, to });
 
-  // Transformace - real-world by mapovala issue.fields.worklog.worklogs[]
-  // Tady jen placeholder, který by se v produkci doplnil podle skutečné struktury
-  const issues = (response.data?.issues ?? []) as any[];
+  const seen = new Set<string>();
   const result: JiraWorklogResponse[] = [];
-  for (const issue of issues) {
-    const worklogs = issue.fields?.worklog?.worklogs ?? [];
-    for (const w of worklogs) {
-      result.push({
-        worklogId: String(w.id),
-        user: w.author?.displayName ?? 'unknown',
-        accountId: w.author?.accountId ?? 'unknown',
-        summary: issue.fields?.summary ?? '',
-        parentKey: issue.fields?.parent?.key ?? '',
-        parentSummary: issue.fields?.parent?.fields?.summary ?? '',
-        components: (issue.fields?.components ?? []).map((c: any) => c.name),
-        sprint: issue.fields?.sprint?.name ?? '',
-        comment: w.comment?.content?.[0]?.content?.[0]?.text ?? '',
-        seconds: w.timeSpentSeconds,
-        started: w.started,
-        issueKey: issue.key,
-      });
+
+  for (const chunk of chunks) {
+    logger.info('Zpracovávám chunk', { from: chunk.from, to: chunk.to });
+
+    const issues = await fetchAllIssuesForRange(client, chunk.from, chunk.to);
+    logger.info('Issues v chunku', { count: issues.length, month: chunk.from.slice(0, 7) });
+
+    for (const issue of issues) {
+      const worklogs = await fetchAllWorklogsForIssue(client, issue.key);
+
+      for (const w of worklogs) {
+        const started = w.started?.slice(0, 10) ?? '';
+        if (started < chunk.from || started > chunk.to) continue;
+        if (seen.has(String(w.id))) continue;
+        seen.add(String(w.id));
+
+        result.push({
+          worklogId: String(w.id),
+          user: w.author?.displayName ?? 'unknown',
+          accountId: w.author?.accountId ?? 'unknown',
+          summary: issue.fields?.summary ?? '',
+          parentKey: issue.fields?.parent?.key ?? '',
+          parentSummary: issue.fields?.parent?.fields?.summary ?? '',
+          components: (issue.fields?.components ?? []).map((c: any) => c.name),
+          sprint: '',
+          comment: w.comment?.content?.[0]?.content?.[0]?.text ?? '',
+          seconds: w.timeSpentSeconds,
+          started: w.started,
+          issueKey: issue.key,
+        });
+      }
     }
   }
+
+  logger.info('Jira worklogy načteny celkem', { count: result.length, chunks: chunks.length });
   return result;
 }

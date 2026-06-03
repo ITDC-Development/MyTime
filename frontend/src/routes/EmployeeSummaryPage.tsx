@@ -90,14 +90,18 @@ export function EmployeeSummaryPage() {
 
   const stats = useMemo(() => {
     const ot = overtimeStats(linear);
+    const vacationHours = absences.filter(a => a.type === 'VACATION' || a.type === 'DAY_OFF').reduce((sum, a) => sum + a.hours, 0);
+    const sickHours = absences.filter(a => a.type === 'SICK_LEAVE').reduce((sum, a) => sum + a.hours, 0);
+    const workedHours = totalWorkedHours(linear);
+    const overtimeHours = Math.max(0, workedHours + vacationHours + sickHours - expectedHours);
     return {
-      totalHours: totalWorkedHours(linear),
-      overtimeHours: ot.totalOvertimeHours,
+      totalHours: workedHours,
+      overtimeHours,
       daysWithOvertime: ot.daysWithOvertime,
-      vacationDays: absences.filter(a => a.type === 'VACATION').length,
-      sickDays: absences.filter(a => a.type === 'SICK_LEAVE').length,
+      vacationHours,
+      sickHours,
     };
-  }, [linear, absences]);
+  }, [linear, absences, expectedHours]);
 
   return (
     <Box>
@@ -120,10 +124,10 @@ export function EmployeeSummaryPage() {
           <>
             <Grid container spacing={2}>
               <Metric label="Odpracováno / Fond" value={`${formatHours(stats.totalHours)} h / ${formatHours(expectedHours)} h`} />
-              <Metric label="Dovolená" value={`${stats.vacationDays} dní`} />
+              <Metric label="Dovolená" value={`${formatHours(stats.vacationHours)} h`} />
+              <Metric label="Nemoc" value={`${formatHours(stats.sickHours)} h`} />
               <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
               <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
-              <Metric label="Nemoc" value={`${stats.sickDays} dní`} />
             </Grid>
 
             {absences.length > 0 && (

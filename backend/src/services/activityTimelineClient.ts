@@ -162,6 +162,10 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
           seen.add(id);
           pageEvents++;
 
+          const hoursPerDay = issue.dailyTimeEstimate != null
+            ? issue.dailyTimeEstimate / 3600
+            : null;
+
           allEvents.push({
             id,
             username,
@@ -169,7 +173,8 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
             type: absenceType,
             start: issue.plannedStart ?? issue.start ?? issue.startDate ?? '',
             end: issue.plannedEnd ?? issue.end ?? issue.endDate ?? issue.plannedStart ?? '',
-            hours: issue.hours ?? issue.duration,
+            hours: issue.hours ?? issue.duration ?? undefined,
+            ...(hoursPerDay != null ? { hoursPerDay } : {}),
           });
         }
       }

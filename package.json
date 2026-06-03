@@ -11,5 +11,12 @@
     "dev:backend": "npm --workspace backend run dev",
     "build": "npm --workspace frontend run build && npm --workspace backend run build",
     "seed": "npm --workspace backend run seed"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.99.0"
+  },
+  "devDependencies": {
+    "exceljs": "^4.4.0",
+    "xlsx": "^0.18.5"
   }
 }

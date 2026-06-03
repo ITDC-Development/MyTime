@@ -7,9 +7,9 @@ import { exportPdf } from '../../services/exporters/pdfExporter';
 interface Props { rows: Record<string, unknown>[]; filename: string; title: string; onExport?: () => Promise<void>; }
 
 export function ExportButtons({ rows, filename, title, onExport }: Props) {
-  const run = async (fn: () => void) => {
+  const run = async (fn: () => void | Promise<void>) => {
     if (onExport) await onExport();
-    fn();
+    await fn();
   };
   return (
     <Box sx={{ display: 'flex', gap: 1 }}>

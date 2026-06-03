@@ -5,6 +5,7 @@ export interface RawWorklog {
   summary: string;
   parentKey: string;
   parentSummary: string;
+  parentIssueType: string;
   components: string[];
   sprint: string;
   comment: string;
@@ -12,6 +13,8 @@ export interface RawWorklog {
   started: string;
   issueKey: string;
   date: string;
+  issueType: string;
+  priority: string;
 }
 
 export interface EditedWorklog {
@@ -59,6 +62,7 @@ export interface LinearWorklog {
   issueKey: string;
   parentKey: string;
   parentSummary: string;
+  parentIssueType: string;
   components: string[];
   sprint: string;
   comment: string;
@@ -66,4 +70,6 @@ export interface LinearWorklog {
   isPause: boolean;
   isEdited: boolean;
   isManual: boolean;
+  issueType: string;
+  priority: string;
 }

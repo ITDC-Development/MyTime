@@ -2,7 +2,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'user' | 'freelancer';
   status: 'pending' | 'active' | 'blocked';
   jiraAccountId: string | null;
   createdAt: string;

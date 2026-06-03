@@ -5,6 +5,7 @@ export interface RawWorklog {
   summary: string;
   parentKey: string;
   parentSummary: string;
+  parentIssueType: string;
   components: string[];
   sprint: string;
   comment: string;
@@ -12,6 +13,8 @@ export interface RawWorklog {
   started: string;
   issueKey: string;
   date: string; // YYYY-MM-DD pro indexaci
+  issueType: string;
+  priority: string;
 }
 
 export interface EditedWorklog {

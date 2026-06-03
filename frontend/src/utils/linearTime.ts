@@ -16,11 +16,14 @@ export interface SourceWorklog {
   issueKey: string;
   parentKey: string;
   parentSummary: string;
+  parentIssueType: string;
   components: string[];
   sprint: string;
   comment: string;
   isEdited: boolean;
   isManual: boolean;
+  issueType: string;
+  priority: string;
 }
 
 export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
@@ -46,9 +49,10 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
           endMinutes: PAUSE_END,
           hours: 0.5,
           summary: 'Pauza (oběd)',
-          issueKey: '', parentKey: '', parentSummary: '',
+          issueKey: '', parentKey: '', parentSummary: '', parentIssueType: '',
           components: [], sprint: '', comment: '',
           isOvertime: false, isPause: true, isEdited: false, isManual: false,
+          issueType: '', priority: '',
         });
         cursor = PAUSE_END;
         pauseInserted = true;
@@ -72,6 +76,7 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
         issueKey: w.issueKey,
         parentKey: w.parentKey,
         parentSummary: w.parentSummary,
+        parentIssueType: w.parentIssueType,
         components: w.components,
         sprint: w.sprint,
         comment: w.comment,
@@ -79,6 +84,8 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
         isPause: false,
         isEdited: w.isEdited,
         isManual: w.isManual,
+        issueType: w.issueType,
+        priority: w.priority,
       });
 
       workedToday += segMinutes;

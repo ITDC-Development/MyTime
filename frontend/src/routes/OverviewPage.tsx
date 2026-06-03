@@ -61,7 +61,20 @@ export function OverviewPage() {
       return obj;
     }), [filtered, columns]);
 
-  const filename = `vykaz_${year}-${String(month).padStart(2, '0')}`;
+  const filename = useMemo(() => {
+    const mm = String(month).padStart(2, '0');
+    const yy = String(year).slice(-2);
+    if (selected.length === 1) {
+      const name = filtered.find(r => !r.isPause)?.user ?? '';
+      if (name) return `${sanitizeName(name)}_${mm}_${yy}`;
+    }
+    if (selected.length > 1) {
+      const name = filtered.find(r => !r.isPause)?.user ?? '';
+      const prefix = name ? sanitizeName(name) : 'vykaz';
+      return `${prefix}_a_dalsi_${mm}_${yy}`;
+    }
+    return `vykaz_${year}-${mm}`;
+  }, [filtered, selected, year, month]);
   const title = `Výkaz · ${monthLabel(year, month)}`;
 
   const onBeforeExport = async () => {
@@ -178,18 +191,32 @@ function labelOf(c: ColumnId): string {
     sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas' }[c];
 }
 
+function sanitizeName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '');
+}
+
+function decodeHtml(s: string): string {
+  const t = document.createElement('textarea');
+  t.innerHTML = s;
+  return t.value;
+}
+
 function renderForExport(r: { user: string; date: string; startMinutes: number; endMinutes: number; issueKey: string; summary: string; parentKey: string; parentSummary: string; sprint: string; components: string[]; hours: number; comment: string; isOvertime: boolean; isPause: boolean; }, c: ColumnId): string {
   switch (c) {
     case 'user': return r.user;
     case 'date': return dayjs(r.date).format('DD. MM. YYYY');
     case 'period': return formatPeriod(r.startMinutes, r.endMinutes);
-    case 'issue': return r.isPause ? r.summary : (r.issueKey || '');
-    case 'name': return r.isPause ? '' : r.summary;
-    case 'parent': return r.parentKey ? `${r.parentKey} ${r.parentSummary}` : '';
-    case 'sprint': return r.sprint;
-    case 'component': return r.components.join(', ');
+    case 'issue': return r.isPause ? decodeHtml(r.summary) : (r.issueKey || '');
+    case 'name': return r.isPause ? '' : decodeHtml(r.summary);
+    case 'parent': return r.parentKey ? `${r.parentKey} ${decodeHtml(r.parentSummary)}` : '';
+    case 'sprint': return decodeHtml(r.sprint);
+    case 'component': return r.components.map(decodeHtml).join(', ');
     case 'hours': return r.isPause ? '' : formatHours(r.hours);
-    case 'comment': return r.comment;
+    case 'comment': return decodeHtml(r.comment);
     case 'overtime': return r.isOvertime ? formatHours(r.hours) : '';
   }
 }

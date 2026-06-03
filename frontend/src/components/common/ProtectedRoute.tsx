@@ -3,7 +3,20 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Typography, Button } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 
-export function ProtectedRoute({ children, requireAdmin }: { children: ReactNode; requireAdmin?: boolean }) {
+type Role = 'admin' | 'user' | 'freelancer';
+
+function defaultRedirect(role: Role) {
+  if (role === 'freelancer') return '/project';
+  return '/company';
+}
+
+export function ProtectedRoute({
+  children, requireAdmin, allowedRoles,
+}: {
+  children: ReactNode;
+  requireAdmin?: boolean;
+  allowedRoles?: Role[];
+}) {
   const { firebaseUser, profile, loading, logout } = useAuth();
   const location = useLocation();
 
@@ -24,7 +37,10 @@ export function ProtectedRoute({ children, requireAdmin }: { children: ReactNode
       onLogout={logout} />;
   }
   if (requireAdmin && profile.role !== 'admin') {
-    return <Navigate to="/company" replace />;
+    return <Navigate to={defaultRedirect(profile.role as Role)} replace />;
+  }
+  if (allowedRoles && !allowedRoles.includes(profile.role as Role)) {
+    return <Navigate to={defaultRedirect(profile.role as Role)} replace />;
   }
   return <>{children}</>;
 }

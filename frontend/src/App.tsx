@@ -11,12 +11,15 @@ import { OverviewPage } from './routes/OverviewPage';
 import { HistoryPage } from './routes/HistoryPage';
 import { EmployeeSummaryPage } from './routes/EmployeeSummaryPage';
 import { UsersAdminPage } from './routes/UsersAdminPage';
+import { HelpPage } from './routes/HelpPage';
+import { SmartReportsPage } from './routes/SmartReportsPage';
 import { useAuth } from './contexts/AuthContext';
 
 function RootRedirect() {
   const { profile } = useAuth();
   if (!profile) return <Navigate to="/login" replace />;
   if (profile.role === 'admin') return <Navigate to="/download" replace />;
+  if (profile.role === 'freelancer') return <Navigate to="/project" replace />;
   return <Navigate to="/company" replace />;
 }
 
@@ -30,12 +33,14 @@ export default function App() {
 
           <Route path="/" element={<ProtectedRoute><AppLayout><RootRedirect /></AppLayout></ProtectedRoute>} />
           <Route path="/download" element={<ProtectedRoute requireAdmin><AppLayout><DownloadDataPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/project" element={<ProtectedRoute requireAdmin><AppLayout><ProjectReportPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/company" element={<ProtectedRoute><AppLayout><CompanyReportPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/project" element={<ProtectedRoute allowedRoles={['admin', 'freelancer']}><AppLayout><ProjectReportPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/company" element={<ProtectedRoute allowedRoles={['admin', 'user']}><AppLayout><CompanyReportPage /></AppLayout></ProtectedRoute>} />
           <Route path="/overview" element={<ProtectedRoute requireAdmin><AppLayout><OverviewPage /></AppLayout></ProtectedRoute>} />
           <Route path="/history" element={<ProtectedRoute requireAdmin><AppLayout><HistoryPage /></AppLayout></ProtectedRoute>} />
-          <Route path="/employee" element={<ProtectedRoute><AppLayout><EmployeeSummaryPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/employee" element={<ProtectedRoute allowedRoles={['admin', 'user']}><AppLayout><EmployeeSummaryPage /></AppLayout></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AppLayout><UsersAdminPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/smart-reports" element={<ProtectedRoute><AppLayout><SmartReportsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/napoveda" element={<ProtectedRoute requireAdmin><AppLayout><HelpPage /></AppLayout></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

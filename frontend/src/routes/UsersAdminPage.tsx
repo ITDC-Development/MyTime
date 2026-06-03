@@ -10,6 +10,10 @@ import { AssignJiraDialog } from '../components/admin/AssignJiraDialog';
 import type { UserProfile } from '../types/user';
 import dayjs from 'dayjs';
 
+const ROLE_LABEL: Record<string, string> = { admin: 'Admin', user: 'User', freelancer: 'Freelancer' };
+const ROLE_COLOR: Record<string, string> = { admin: 'secondary', user: 'default', freelancer: 'info' };
+const ROLE_CYCLE: Record<string, string> = { admin: 'user', user: 'freelancer', freelancer: 'admin' };
+
 export function UsersAdminPage() {
   const { profile } = useAuth();
   const { users } = useUsers();
@@ -61,7 +65,7 @@ export function UsersAdminPage() {
       <TableCell>{u.email}</TableCell>
       <TableCell>{u.displayName}</TableCell>
       <TableCell>{dayjs(u.createdAt).format('DD. MM. YYYY')}</TableCell>
-      <TableCell><Chip size="small" label={u.role === 'admin' ? 'Admin' : 'User'} color={u.role === 'admin' ? 'secondary' : 'default'} /></TableCell>
+      <TableCell><Chip size="small" label={ROLE_LABEL[u.role] ?? u.role} color={(ROLE_COLOR[u.role] ?? 'default') as any} /></TableCell>
       <TableCell>
         <Stack direction="row" alignItems="center" spacing={0.5}>
           {u.jiraAccountId
@@ -83,11 +87,11 @@ export function UsersAdminPage() {
           )}
           {sectionType === 'active' && (
             <>
-              <IconButton size="small" title="Přepnout roli" onClick={() => {
-                const newRole = u.role === 'admin' ? 'user' : 'admin';
-                const isLast = lastAdminWarning(u) && newRole === 'user';
+              <IconButton size="small" title={`Změnit roli (aktuálně: ${ROLE_LABEL[u.role] ?? u.role})`} onClick={() => {
+                const newRole = ROLE_CYCLE[u.role] ?? 'user';
+                const isLast = lastAdminWarning(u) && newRole !== 'admin';
                 const run = async () => updateUser(u.uid, { role: newRole });
-                if (isLast || u.uid === profile?.uid) askConfirm(u, `změnit roli na ${newRole}`, run);
+                if (isLast || u.uid === profile?.uid) askConfirm(u, `změnit roli na ${ROLE_LABEL[newRole]}`, run);
                 else run();
               }}>
                 {u.role === 'admin' ? <ArrowDownward fontSize="small" /> : <ArrowUpward fontSize="small" />}

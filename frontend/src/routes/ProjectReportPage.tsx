@@ -1,12 +1,16 @@
 import { useState, useMemo, useEffect } from 'react';
-import { Box, Typography, Paper, Stack, Button } from '@mui/material';
-import { Add } from '@mui/icons-material';
+import { Box, Typography, Paper, Stack, Button, Grid, Card, CardContent } from '@mui/material';
+import { Add, PictureAsPdf } from '@mui/icons-material';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
 import { usePreferences } from '../hooks/usePreferences';
-import { currentMonth, monthLabel } from '../utils/dateUtils';
+import { currentMonth, monthLabel, monthRange } from '../utils/dateUtils';
+import { formatHours } from '../utils/formatters';
+import { totalWorkedHours } from '../utils/overtime';
 import { filterPauses } from '../utils/pauseRules';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
@@ -18,23 +22,34 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { WorklogEditDialog } from '../components/reports/WorklogEditDialog';
 import { ManualWorklogDialog } from '../components/reports/ManualWorklogDialog';
 import { HistoryDialog } from '../components/reports/HistoryDialog';
+import { exportPdf, type PdfSummaryItem } from '../services/exporters/pdfExporter';
 import type { LinearWorklog } from '../types/worklog';
 import type { ColumnId } from '../types/export';
+import type { Absence } from '../types/jira';
 
 export function ProjectReportPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
+  const isFreelancer = profile?.role === 'freelancer';
+  const ownAccount = profile?.jiraAccountId ?? null;
   const { users } = useUsers();
   const { preferences, update } = usePreferences();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
   const [month, setMonth] = useState(curM);
-  const [selected, setSelected] = useState<string[]>(!isAdmin && preferences?.lastSelectedUser ? [preferences.lastSelectedUser] : []);
+  const [selected, setSelected] = useState<string[]>(
+    isFreelancer && ownAccount ? [ownAccount] : (!isAdmin && preferences?.lastSelectedUser ? [preferences.lastSelectedUser] : [])
+  );
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
 
+  useEffect(() => {
+    if (isFreelancer && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
+  }, [isFreelancer, ownAccount]);
+
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const accountId = selected[0] ?? null;
   const { linear } = useWorklogs({ accountIds, year, month });
 
   const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
@@ -46,11 +61,42 @@ export function ProjectReportPage() {
       );
     }
   }, [linear, accountIds, isAdmin]);
+
+  // Absence pro výpočet fondu (jen pro freelancera)
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  useEffect(() => {
+    if (!isFreelancer || !accountId) { setAbsences([]); return; }
+    const { from, to } = monthRange(year, month);
+    const q = query(
+      collection(firestore, 'absences'),
+      where('accountId', '==', accountId),
+      where('date', '>=', from),
+      where('date', '<=', to)
+    );
+    return onSnapshot(q, snap => setAbsences(snap.docs.map(d => d.data() as Absence)));
+  }, [isFreelancer, accountId, year, month]);
+
+  const expectedHours = useMemo(() => {
+    if (!isFreelancer) return 0;
+    const { from, to } = monthRange(year, month);
+    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    let workingDays = 0;
+    const cur = new Date(from + 'T00:00:00Z');
+    const end = new Date(to + 'T00:00:00Z');
+    while (cur <= end) {
+      const dow = cur.getUTCDay();
+      const dateStr = cur.toISOString().slice(0, 10);
+      if (dow !== 0 && dow !== 6 && !holidayDates.has(dateStr)) workingDays++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return workingDays * 8;
+  }, [isFreelancer, year, month, absences]);
+
+  const workedHours = useMemo(() => totalWorkedHours(linear), [linear]);
+
   const showPauses = preferences?.showPauses ?? true;
   const columns: ColumnId[] = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
-
   const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
-  const accountId = selected[0] ?? null;
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
   const selectedUser = users.find(u => u.jiraAccountId === accountId);
 
@@ -59,6 +105,20 @@ export function ProjectReportPage() {
     setSelected(next);
     update({ lastSelectedUser: next[0] ?? null });
   };
+
+  const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const pdfRows = filtered.map(r => ({
+    'Datum': r.date,
+    'Od': fmt(r.startMinutes),
+    'Do': fmt(r.endMinutes),
+    'Hodiny': r.hours.toFixed(2),
+    'Issue': r.issueKey,
+    'Popis': r.summary,
+  }));
+  const pdfSummary: PdfSummaryItem[] = [
+    { label: 'Odpracováno', value: `${formatHours(workedHours)} h` },
+    { label: 'Fond', value: `${formatHours(expectedHours)} h` },
+  ];
 
   return (
     <Box>
@@ -72,10 +132,7 @@ export function ProjectReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin
-            ? <UserSelect jiraUsers={jiraUsers} value={selected} onChange={handleSelectionChange} />
-            : <UserSelect users={users} value={selected} onChange={handleSelectionChange} />
-          }
+          {isAdmin && <UserSelect jiraUsers={jiraUsers} value={selected} onChange={handleSelectionChange} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
           <ColumnPickerDropdown
@@ -87,6 +144,39 @@ export function ProjectReportPage() {
 
         {(accountId || (isAdmin && selected.length === 0)) ? (
           <>
+            {isFreelancer && accountId && (
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Grid item xs={12} sm={6} md={4}>
+                  <Card sx={{ background: '#FAF7F0' }}>
+                    <CardContent>
+                      <Typography variant="caption" color="text.secondary">Odpracováno / Fond</Typography>
+                      <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500 }}>
+                        {formatHours(workedHours)} h / {formatHours(expectedHours)} h
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+            )}
+
+            {isFreelancer && accountId && (
+              <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<PictureAsPdf />}
+                  onClick={() => exportPdf(
+                    pdfRows,
+                    `projektovy-vyzkaz-${year}-${String(month).padStart(2, '0')}`,
+                    `Projektový výkaz – ${profile?.displayName} – ${monthLabel(year, month)}`,
+                    pdfSummary
+                  )}
+                >
+                  Stáhnout PDF
+                </Button>
+              </Stack>
+            )}
+
             <WorklogTable
               rows={filtered}
               columns={columns}
@@ -94,27 +184,31 @@ export function ProjectReportPage() {
               onEdit={r => setEditTarget(r)}
               onHistory={r => setHistoryTarget(r)}
             />
-            <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
-              {isAdmin && !isLocked && (
-                <Button size="small" variant="outlined" startIcon={<Add />} onClick={() => setManualOpen(true)}>
-                  Přidat ruční záznam
-                </Button>
-              )}
-              <LockButton
-                locked={isLocked}
-                onToggle={async () => isLocked ? unlockNow(accountId) : lockNow(accountId)}
-                monthLabel={monthLabel(year, month)}
-              />
-            </Stack>
+            {isAdmin && (
+              <Stack direction="row" spacing={1} sx={{ mt: 2 }}>
+                {!isLocked && (
+                  <Button size="small" variant="outlined" startIcon={<Add />} onClick={() => setManualOpen(true)}>
+                    Přidat ruční záznam
+                  </Button>
+                )}
+                <LockButton
+                  locked={isLocked}
+                  onToggle={async () => isLocked ? unlockNow(accountId) : lockNow(accountId)}
+                  monthLabel={monthLabel(year, month)}
+                />
+              </Stack>
+            )}
           </>
         ) : (
-          <Typography color="text.secondary">Vyber zaměstnance, jehož výkaz chceš zobrazit.</Typography>
+          <Typography color="text.secondary">
+            {isFreelancer ? 'Tvůj Jira účet zatím nebyl spárován administrátorem.' : 'Vyber zaměstnance, jehož výkaz chceš zobrazit.'}
+          </Typography>
         )}
       </Paper>
 
       <WorklogEditDialog open={Boolean(editTarget)} worklog={editTarget} onClose={() => setEditTarget(null)} />
       <HistoryDialog open={Boolean(historyTarget)} worklogId={historyTarget?.worklogId ?? null} onClose={() => setHistoryTarget(null)} />
-      {selectedUser && (
+      {isAdmin && selectedUser && (
         <ManualWorklogDialog
           open={manualOpen}
           accountId={accountId!}

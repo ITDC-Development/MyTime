@@ -75,6 +75,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
           summary: w.summary,
           parentKey: w.parentKey ?? '',
           parentSummary: w.parentSummary ?? '',
+          parentIssueType: w.parentIssueType ?? '',
           components: w.components ?? [],
           sprint: w.sprint ?? '',
           comment: w.comment ?? '',
@@ -82,6 +83,8 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
           started: w.started,
           issueKey: w.issueKey,
           date,
+          issueType: w.issueType ?? '',
+          priority: w.priority ?? '',
         },
       });
     }
@@ -104,8 +107,14 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     const absDocs: { ref: FirebaseFirestore.DocumentReference; data: Absence }[] = [];
 
     for (const a of absences) {
-      const start = new Date(a.start);
-      const end = new Date(a.end ?? a.start);
+      const start = new Date(a.start + 'T00:00:00Z');
+      const end = new Date((a.end ?? a.start) + 'T00:00:00Z');
+      const totalDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+      const hoursPerDay = a.hoursPerDay != null
+        ? a.hoursPerDay
+        : a.hours != null
+          ? a.hours / totalDays
+          : 8;
       const cur = new Date(start);
       let dayIndex = 0;
       while (cur <= end) {
@@ -118,7 +127,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
             accountId: a.accountId,
             type: a.type as Absence['type'],
             date: dayStr,
-            hours: 8,
+            hours: hoursPerDay,
           },
         });
         dayIndex++;

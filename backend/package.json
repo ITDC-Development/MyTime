@@ -9,18 +9,20 @@
     "seed": "ts-node src/scripts/seed.ts"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "cors": "^2.8.5",
-    "firebase-admin": "^12.6.0",
+    "@anthropic-ai/sdk": "^0.99.0",
     "axios": "^1.7.7",
-    "dotenv": "^16.4.5"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^8.5.2",
+    "firebase-admin": "^12.6.0"
   },
   "devDependencies": {
-    "typescript": "^5.6.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "@types/express": "^4.17.21",
-    "@types/cors": "^2.8.17",
-    "@types/node": "^22.7.0"
+    "typescript": "^5.6.0"
   }
 }

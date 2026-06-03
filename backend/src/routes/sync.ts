@@ -16,9 +16,11 @@ router.post('/manual', authenticate, requireAdmin, async (req: AuthedRequest, re
     res.json(result);
   } catch (err) {
     logger.error('Manuální sync selhal', { err: String(err) });
-    res.status(500).json({ error: 'Sync failed', details: String(err) });
+    res.status(500).json({ error: 'Sync failed' });
   }
 });
+
+router.all('/manual', (_req, res) => res.status(405).json({ error: 'Method not allowed' }));
 
 // Plánovaný sync - volá Cloud Scheduler s OIDC tokenem
 router.post('/scheduled', async (_req, res) => {

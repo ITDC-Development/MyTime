@@ -22,7 +22,7 @@ export const T = {
   menu: {
     download: 'Stažení dat',
     project: 'Projektový výkaz',
-    company: 'Firemní výkaz',
+    company: 'Docházka',
     overview: 'Přehledy',
     history: 'Historie změn',
     employee: 'Přehled zaměstnance',

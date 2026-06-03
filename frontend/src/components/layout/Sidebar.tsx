@@ -1,7 +1,7 @@
 import { Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Box, Avatar, Typography, Divider, Badge } from '@mui/material';
 import {
   CloudDownload, FolderSpecial, Business, Assessment,
-  History as HistoryIcon, Person, ManageAccounts, Logout, AccessTime,
+  History as HistoryIcon, Person, ManageAccounts, Logout, AccessTime, HelpOutline, AutoAwesome,
 } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -13,16 +13,23 @@ interface MenuItem { path: string; label: string; icon: JSX.Element; }
 const ADMIN_MENU: MenuItem[] = [
   { path: '/download', label: 'Stažení dat', icon: <CloudDownload /> },
   { path: '/project', label: 'Projektový výkaz', icon: <FolderSpecial /> },
-  { path: '/company', label: 'Firemní výkaz', icon: <Business /> },
+  { path: '/company', label: 'Docházka', icon: <Business /> },
   { path: '/overview', label: 'Přehledy', icon: <Assessment /> },
+  { path: '/smart-reports', label: 'Chytré přehledy', icon: <AutoAwesome /> },
   { path: '/history', label: 'Historie změn', icon: <HistoryIcon /> },
   { path: '/employee', label: 'Přehled zaměstnance', icon: <Person /> },
   { path: '/admin/users', label: 'Správa uživatelů', icon: <ManageAccounts /> },
 ];
 
 const USER_MENU: MenuItem[] = [
-  { path: '/company', label: 'Firemní výkaz', icon: <Business /> },
+  { path: '/company', label: 'Docházka', icon: <Business /> },
   { path: '/employee', label: 'Přehled zaměstnance', icon: <Person /> },
+  { path: '/smart-reports', label: 'Chytré přehledy', icon: <AutoAwesome /> },
+];
+
+const FREELANCER_MENU: MenuItem[] = [
+  { path: '/project', label: 'Projektový výkaz', icon: <FolderSpecial /> },
+  { path: '/smart-reports', label: 'Chytré přehledy', icon: <AutoAwesome /> },
 ];
 
 export const SIDEBAR_WIDTH = 240;
@@ -34,7 +41,7 @@ export function Sidebar() {
   const { users } = useUsers();
   const pendingCount = profile?.role === 'admin' ? users.filter(u => u.status === 'pending').length : 0;
 
-  const menu = profile?.role === 'admin' ? ADMIN_MENU : USER_MENU;
+  const menu = profile?.role === 'admin' ? ADMIN_MENU : profile?.role === 'freelancer' ? FREELANCER_MENU : USER_MENU;
 
   const initials = (profile?.displayName ?? profile?.email ?? '?')
     .split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
@@ -93,6 +100,34 @@ export function Sidebar() {
           );
         })}
       </List>
+
+      {profile?.role === 'admin' && (
+        <>
+          <Divider />
+          <List sx={{ py: 0.5 }}>
+            <ListItem disablePadding>
+              <ListItemButton
+                onClick={() => navigate('/napoveda')}
+                selected={location.pathname === '/napoveda'}
+                sx={{
+                  mx: 1, borderRadius: 1.5,
+                  '&.Mui-selected': {
+                    backgroundColor: 'rgba(44,140,153,0.1)',
+                    color: BRAND.teal,
+                    borderLeft: `3px solid ${BRAND.teal}`,
+                    pl: 1.6,
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 36, color: location.pathname === '/napoveda' ? BRAND.teal : 'text.secondary' }}>
+                  <HelpOutline />
+                </ListItemIcon>
+                <ListItemText primary="Nápověda" primaryTypographyProps={{ fontSize: 14 }} />
+              </ListItemButton>
+            </ListItem>
+          </List>
+        </>
+      )}
 
       <Divider />
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>

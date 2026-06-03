@@ -52,7 +52,7 @@ router.get('/', authenticate, requireAdmin, async (_req, res) => {
 
 router.patch('/:uid', authenticate, requireAdmin, async (req: AuthedRequest, res) => {
   const { uid } = req.params;
-  const updates = req.body as { role?: 'admin' | 'user'; status?: 'active' | 'pending' | 'blocked' };
+  const updates = req.body as { role?: 'admin' | 'user' | 'freelancer'; status?: 'active' | 'pending' | 'blocked' };
 
   // Bezpečnostní pojistka pro posledního admina - jen warning v UI, server jen loguje
   if (updates.role === 'user' || updates.status === 'blocked') {

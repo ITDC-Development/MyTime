@@ -30,6 +30,10 @@ service cloud.firestore {
       return email.matches('.*@(it-dc\\.cz|it-dc\\.sk)$');
     }
 
+    function ownJiraAccount(accountId) {
+      return userProfile(request.auth.uid).jiraAccountId == accountId;
+    }
+
     // Pozvánky – admin vytváří, kdokoliv může číst (token je tajný UUID), pozvaný uživatel označí jako použitou
     match /invites/{token} {
       allow read: if true;
@@ -56,37 +60,40 @@ service cloud.firestore {
     // Worklogs (raw + edited + manual): only active users can read; admin writes all,
     // user can edit only own worklogs in unlocked months
     match /worklogs_raw/{worklogId} {
-      allow read: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
       allow write: if isAdmin();
     }
 
     match /worklogs_edited/{worklogId} {
-      allow read: if isActiveUser();
-      allow write: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
+      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
+      allow update: if isActiveUser() && ownJiraAccount(resource.data.accountId);
+      allow delete: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
     }
 
     match /manual_worklogs/{worklogId} {
-      allow read: if isActiveUser();
-      allow create, update: if isActiveUser();
-      allow delete: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
+      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
+      allow update: if isActiveUser() && ownJiraAccount(resource.data.accountId);
+      allow delete: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
     }
 
     // Absences read-only for active users; backend writes
     match /absences/{absenceId} {
-      allow read: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
       allow write: if isAdmin();
     }
 
-    // Locks: read all active, write admin
+    // Locks: read own or admin
     match /locks/{lockId} {
-      allow read: if isActiveUser();
-      allow write: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
+      allow write: if isAdmin();
     }
 
-    // Audit log: read all active, write all active (system-driven via app)
+    // Audit log: read own or admin, write own only
     match /audit_log/{logId} {
-      allow read: if isActiveUser();
-      allow create: if isActiveUser();
+      allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
+      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
     }
 
     // Sync log: admin only

@@ -66,11 +66,14 @@ export function useWorklogs({ accountIds, year, month }: Args) {
         issueKey: e?.issueKey ?? r.issueKey,
         parentKey: e?.parentKey ?? r.parentKey,
         parentSummary: e?.parentSummary ?? r.parentSummary,
+        parentIssueType: r.parentIssueType ?? '',
         components: e?.components ?? r.components,
         sprint: e?.sprint ?? r.sprint,
         comment: e?.comment ?? r.comment,
         isEdited: Boolean(e),
         isManual: false,
+        issueType: r.issueType ?? '',
+        priority: r.priority ?? '',
       };
       (byUser[r.accountId] ||= []).push(merged);
     }
@@ -86,11 +89,14 @@ export function useWorklogs({ accountIds, year, month }: Args) {
         issueKey: '',
         parentKey: m.parentKey ?? '',
         parentSummary: m.parentSummary ?? '',
+        parentIssueType: '',
         components: m.components ?? [],
         sprint: m.sprint ?? '',
         comment: m.comment,
         isEdited: false,
         isManual: true,
+        issueType: '',
+        priority: '',
       };
       (byUser[m.accountId] ||= []).push(merged);
     }

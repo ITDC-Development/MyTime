@@ -13,9 +13,9 @@ function generateMockWorklogs(from: string, to: string): JiraWorklogResponse[] {
     { user: 'Pavel Dvořák', accountId: 'acc-pavel' },
   ];
   const issues = [
-    { key: 'ENBW-2125', summary: 'Push-Jobs einplanen', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'] },
-    { key: 'ENBW-2108', summary: 'Review change requests', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'] },
-    { key: 'ENBW-2110', summary: 'Implementace endpointu', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'] },
+    { key: 'ENBW-2125', summary: 'Push-Jobs einplanen', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'], issueType: 'Task', priority: 'Medium' },
+    { key: 'ENBW-2108', summary: 'Review change requests', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'], issueType: 'Bug', priority: 'High' },
+    { key: 'ENBW-2110', summary: 'Implementace endpointu', parentKey: 'ENBW-35', parent: 'PM :: MOPO', components: ['SAP PM Custom Code'], issueType: 'Story', priority: 'Low' },
   ];
 
   const result: JiraWorklogResponse[] = [];
@@ -39,6 +39,8 @@ function generateMockWorklogs(from: string, to: string): JiraWorklogResponse[] {
           parentSummary: issue.parent,
           components: issue.components,
           sprint: 'ENBW Sprint Květen 2026',
+          issueType: issue.issueType,
+          priority: issue.priority,
           comment: '',
           seconds: hours * 3600,
           started: startedAt.toISOString(),
@@ -86,7 +88,7 @@ async function fetchAllIssuesForRange(client: AxiosInstance, from: string, to: s
     try {
       const body: Record<string, any> = {
         jql: `worklogDate >= "${from}" AND worklogDate <= "${to}"`,
-        fields: ['summary', 'components', 'parent'],
+        fields: ['summary', 'components', 'parent', 'issuetype', 'priority', 'customfield_10020'],
         maxResults: PAGE_SIZE,
       };
       if (nextPageToken) body.nextPageToken = nextPageToken;
@@ -131,6 +133,14 @@ async function fetchAllWorklogsForIssue(client: AxiosInstance, issueKey: string)
   return worklogs;
 }
 
+function parseSprint(sprintField: any): string {
+  if (!Array.isArray(sprintField) || sprintField.length === 0) return '';
+  // Prefer active sprint, otherwise take the last one
+  const active = sprintField.find((s: any) => s.state === 'active');
+  const sprint = active ?? sprintField[sprintField.length - 1];
+  return sprint?.name ?? '';
+}
+
 export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraWorklogResponse[]> {
   if (USE_MOCK || !process.env.JIRA_API_TOKEN) {
     logger.info('Načítám mock Jira worklogy', { from, to });
@@ -170,8 +180,11 @@ export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraW
           summary: issue.fields?.summary ?? '',
           parentKey: issue.fields?.parent?.key ?? '',
           parentSummary: issue.fields?.parent?.fields?.summary ?? '',
+          parentIssueType: issue.fields?.parent?.fields?.issuetype?.name ?? '',
           components: (issue.fields?.components ?? []).map((c: any) => c.name),
-          sprint: '',
+          sprint: parseSprint(issue.fields?.customfield_10020),
+          issueType: issue.fields?.issuetype?.name ?? '',
+          priority: issue.fields?.priority?.name ?? '',
           comment: w.comment?.content?.[0]?.content?.[0]?.text ?? '',
           seconds: w.timeSpentSeconds,
           started: w.started,

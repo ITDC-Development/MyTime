@@ -1,11 +1,17 @@
-import { useState, useEffect } from 'react';
-import { Box, Typography, Paper, Stack } from '@mui/material';
+import { useState, useEffect, useMemo } from 'react';
+import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Alert, Button } from '@mui/material';
+import { PictureAsPdf } from '@mui/icons-material';
+import { exportPdf, type PdfSummaryItem } from '../services/exporters/pdfExporter';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
 import { usePreferences } from '../hooks/usePreferences';
-import { currentMonth, monthLabel } from '../utils/dateUtils';
+import { currentMonth, monthLabel, monthRange } from '../utils/dateUtils';
+import { formatHours } from '../utils/formatters';
+import { overtimeStats, totalWorkedHours } from '../utils/overtime';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
 import { ColumnPickerDropdown } from '../components/common/ColumnPickerDropdown';
@@ -16,6 +22,7 @@ import { WorklogEditDialog } from '../components/reports/WorklogEditDialog';
 import { HistoryDialog } from '../components/reports/HistoryDialog';
 import type { LinearWorklog } from '../types/worklog';
 import type { ColumnId } from '../types/export';
+import type { Absence } from '../types/jira';
 
 export function CompanyReportPage() {
   const { profile } = useAuth();
@@ -26,6 +33,7 @@ export function CompanyReportPage() {
   const [month, setMonth] = useState(curM);
 
   const isAdmin = profile?.role === 'admin';
+  const isFreelancer = profile?.role === 'freelancer';
   const ownAccount = profile?.jiraAccountId ?? null;
   const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
 
@@ -34,33 +42,114 @@ export function CompanyReportPage() {
   }, [isAdmin, ownAccount]);
 
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const accountId = selected[0] ?? null;
 
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const { linear } = useWorklogs({ accountIds, year, month });
 
+  const freelancerAccountIds = useMemo(
+    () => new Set(users.filter(u => u.role === 'freelancer' && u.jiraAccountId).map(u => u.jiraAccountId!)),
+    [users]
+  );
+
   const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
   useEffect(() => {
     if (isAdmin && accountIds === null && linear.length > 0) {
       setJiraUsers(
-        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
+        Array.from(new Map(
+          linear
+            .filter(w => !freelancerAccountIds.has(w.accountId))
+            .map(w => [w.accountId, { accountId: w.accountId, name: w.user }])
+        ).values())
           .sort((a, b) => a.name.localeCompare(b.name))
       );
     }
-  }, [linear, accountIds, isAdmin]);
+  }, [linear, accountIds, isAdmin, freelancerAccountIds]);
+
+  const [absences, setAbsences] = useState<Absence[]>([]);
+  const [absenceError, setAbsenceError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!accountId) { setAbsences([]); return; }
+    const { from, to } = monthRange(year, month);
+    const q = query(
+      collection(firestore, 'absences'),
+      where('accountId', '==', accountId),
+      where('date', '>=', from),
+      where('date', '<=', to)
+    );
+    return onSnapshot(q,
+      snap => { setAbsenceError(null); setAbsences(snap.docs.map(d => d.data() as Absence)); },
+      err => setAbsenceError(`Chyba při načítání absencí: ${err.message}`)
+    );
+  }, [accountId, year, month]);
+
+  const expectedHours = useMemo(() => {
+    const { from, to } = monthRange(year, month);
+    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    let workingDays = 0;
+    const cur = new Date(from + 'T00:00:00Z');
+    const end = new Date(to + 'T00:00:00Z');
+    while (cur <= end) {
+      const dow = cur.getUTCDay();
+      const dateStr = cur.toISOString().slice(0, 10);
+      if (dow !== 0 && dow !== 6 && !holidayDates.has(dateStr)) workingDays++;
+      cur.setUTCDate(cur.getUTCDate() + 1);
+    }
+    return workingDays * 8;
+  }, [year, month, absences]);
+
+  const stats = useMemo(() => {
+    const ot = overtimeStats(linear);
+    const vacationHours = absences.filter(a => a.type === 'VACATION' || a.type === 'DAY_OFF').reduce((sum, a) => sum + a.hours, 0);
+    const sickHours = absences.filter(a => a.type === 'SICK_LEAVE').reduce((sum, a) => sum + a.hours, 0);
+    const workedHours = totalWorkedHours(linear);
+    const overtimeHours = Math.max(0, workedHours + vacationHours + sickHours - expectedHours);
+    return {
+      totalHours: workedHours,
+      overtimeHours,
+      daysWithOvertime: ot.daysWithOvertime,
+      vacationHours,
+      sickHours,
+    };
+  }, [linear, absences, expectedHours]);
+
+  const visibleLinear = useMemo(
+    () => isAdmin && !accountId ? linear.filter(r => !freelancerAccountIds.has(r.accountId)) : linear,
+    [linear, isAdmin, accountId, freelancerAccountIds]
+  );
+
   const columns: ColumnId[] = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
-  const filtered = linear;
-  const accountId = selected[0] ?? null;
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
+
+  const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  const pdfRows = linear
+    .filter(r => !r.isPause)
+    .map(r => ({
+      'Datum': r.date,
+      'Od': fmt(r.startMinutes),
+      'Do': fmt(r.endMinutes),
+      'Hodiny': r.hours.toFixed(2),
+      'Issue': r.issueKey,
+      'Popis': r.summary,
+    }));
+  const pdfSummary: PdfSummaryItem[] = [
+    { label: 'Odpracováno / Fond', value: `${formatHours(stats.totalHours)} h / ${formatHours(expectedHours)} h` },
+    { label: 'Dovolená', value: `${formatHours(stats.vacationHours)} h` },
+    { label: 'Nemoc', value: `${formatHours(stats.sickHours)} h` },
+    { label: 'Přesčas', value: `${formatHours(stats.overtimeHours)} h` },
+    { label: 'Dnů s přesčasem', value: `${stats.daysWithOvertime}` },
+  ];
 
   return (
     <Box>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
-        <Typography variant="h4">Firemní výkaz</Typography>
+        <Typography variant="h4">Docházka</Typography>
         {accountId && <LockBadge locked={isLocked} />}
       </Stack>
       <Typography color="text.secondary" sx={{ mb: 3 }}>
-        Pohled pro firemní účely s povinnou polední pauzou 12:00–12:30.
+        Přehled docházky s povinnou polední pauzou 12:00–12:30.
       </Typography>
 
       <Paper sx={{ p: 3 }}>
@@ -75,10 +164,33 @@ export function CompanyReportPage() {
           />
         </Stack>
 
+        {absenceError && <Alert severity="error" sx={{ mb: 2 }}>{absenceError}</Alert>}
+
         {(accountId || (isAdmin && selected.length === 0)) ? (
           <>
+            {accountId && (
+              <Grid container spacing={2} sx={{ mb: 3 }}>
+                <Metric label="Odpracováno / Fond" value={`${formatHours(stats.totalHours)} h / ${formatHours(expectedHours)} h`} />
+                <Metric label="Dovolená" value={`${formatHours(stats.vacationHours)} h`} />
+                <Metric label="Nemoc" value={`${formatHours(stats.sickHours)} h`} />
+                <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
+                <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
+              </Grid>
+            )}
+            {!isAdmin && accountId && (
+              <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<PictureAsPdf />}
+                  onClick={() => exportPdf(pdfRows, `dochazka-${year}-${String(month).padStart(2, '0')}`, `Docházka – ${profile?.displayName} – ${monthLabel(year, month)}`, pdfSummary)}
+                >
+                  Stáhnout PDF
+                </Button>
+              </Stack>
+            )}
             <WorklogTable
-              rows={filtered}
+              rows={visibleLinear}
               columns={columns}
               isLocked={isLocked || !isAdmin}
               showOvertime
@@ -97,7 +209,7 @@ export function CompanyReportPage() {
           </>
         ) : (
           <Typography color="text.secondary">
-            {isAdmin ? 'Vyber zaměstnance, jehož výkaz chceš zobrazit.' : 'Tvůj Jira účet zatím nebyl spárován administrátorem.'}
+            {isAdmin ? 'Vyber zaměstnance, jehož docházku chceš zobrazit.' : 'Tvůj Jira účet zatím nebyl spárován administrátorem.'}
           </Typography>
         )}
       </Paper>
@@ -105,5 +217,18 @@ export function CompanyReportPage() {
       <WorklogEditDialog open={Boolean(editTarget)} worklog={editTarget} onClose={() => setEditTarget(null)} />
       <HistoryDialog open={Boolean(historyTarget)} worklogId={historyTarget?.worklogId ?? null} onClose={() => setHistoryTarget(null)} />
     </Box>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <Grid item xs={12} sm={6} md={4}>
+      <Card sx={{ background: '#FAF7F0' }}>
+        <CardContent>
+          <Typography variant="caption" color="text.secondary">{label}</Typography>
+          <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500 }}>{value}</Typography>
+        </CardContent>
+      </Card>
+    </Grid>
   );
 }

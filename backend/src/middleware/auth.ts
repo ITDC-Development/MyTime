@@ -3,7 +3,7 @@ import { authAdmin, db } from '../services/firestoreClient';
 import { logger } from '../utils/logger';
 
 export interface AuthedRequest extends Request {
-  user?: { uid: string; email: string; role: 'admin' | 'user'; status: string };
+  user?: { uid: string; email: string; role: 'admin' | 'user' | 'freelancer'; status: string };
 }
 
 export async function authenticate(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -18,7 +18,7 @@ export async function authenticate(req: AuthedRequest, res: Response, next: Next
     if (!snap.exists) {
       return res.status(403).json({ error: 'User profile not found' });
     }
-    const profile = snap.data() as { role: 'admin' | 'user'; status: string; email: string };
+    const profile = snap.data() as { role: 'admin' | 'user' | 'freelancer'; status: string; email: string };
     if (profile.status !== 'active') {
       return res.status(403).json({ error: `Account ${profile.status}` });
     }
@@ -32,6 +32,13 @@ export async function authenticate(req: AuthedRequest, res: Response, next: Next
 
 export function requireAdmin(req: AuthedRequest, res: Response, next: NextFunction) {
   if (req.user?.role !== 'admin') {
+    logger.warn('Neoprávněný přístup k admin endpointu', {
+      uid: req.user?.uid,
+      email: req.user?.email,
+      role: req.user?.role,
+      method: req.method,
+      path: req.originalUrl,
+    });
     return res.status(403).json({ error: 'Admin only' });
   }
   next();

@@ -43,13 +43,14 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
 
   const opts = (users ?? []).filter(u => u.jiraAccountId && u.status === 'active');
   const sel = opts.filter(u => value.includes(u.jiraAccountId!));
+  const label_of = (u: typeof opts[0]) => u.jiraDisplayName || u.displayName;
 
   return (
     <Autocomplete
       multiple={multiple}
       size="small"
       options={opts}
-      getOptionLabel={(o) => o.displayName}
+      getOptionLabel={label_of}
       isOptionEqualToValue={(a, b) => a.uid === b.uid}
       value={multiple ? sel : (sel[0] ?? null) as any}
       onChange={(_, v) => {
@@ -60,7 +61,7 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
       renderInput={(params) => <TextField {...params} label={label} />}
       renderTags={(tagValue, getTagProps) =>
         tagValue.map((option, index) => (
-          <Chip size="small" label={option.displayName} {...getTagProps({ index })} key={option.uid} />
+          <Chip size="small" label={label_of(option)} {...getTagProps({ index })} key={option.uid} />
         ))
       }
     />

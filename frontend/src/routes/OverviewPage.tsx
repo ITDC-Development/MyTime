@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
@@ -15,7 +15,7 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { ExportButtons } from '../components/export/ExportButtons';
 import { ExportPresetManager } from '../components/export/ExportPresetManager';
 import { setLocks } from '../services/firestore/locks';
-import { ColumnId } from '../types/export';
+import { ColumnId, LOCKED_COLUMNS } from '../types/export';
 import type { ExportPreset } from '../types/user';
 import dayjs from 'dayjs';
 
@@ -33,17 +33,11 @@ export function OverviewPage() {
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
   const { linear } = useWorklogs({ accountIds, year, month });
   const showPauses = preferences?.showPauses ?? true;
-  const stored = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'name', 'hours'];
-
-  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
-  useEffect(() => {
-    if (isAdmin && accountIds === null && linear.length > 0) {
-      setJiraUsers(
-        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-  }, [linear, accountIds, isAdmin]);
+  const stored = useMemo(() => {
+    const prefs = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'name', 'hours'];
+    const missing = LOCKED_COLUMNS.filter(c => !prefs.includes(c));
+    return missing.length ? [...missing, ...prefs] : prefs;
+  }, [preferences]);
 
   const columns = useMemo(() => {
     if (selected.length > 1 && !stored.includes('user')) return ['user' as ColumnId, ...stored];
@@ -123,10 +117,7 @@ export function OverviewPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin
-            ? <UserSelect jiraUsers={jiraUsers} value={selected} onChange={setSelected} multiple label="Uživatelé" />
-            : <UserSelect users={users} value={selected} onChange={setSelected} multiple label="Uživatelé" />
-          }
+          <UserSelect users={users} value={selected} onChange={setSelected} multiple label="Uživatelé" />
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
         </Stack>
@@ -134,6 +125,7 @@ export function OverviewPage() {
         <ColumnPicker
           selected={stored}
           onChange={cols => update({ columns: { ...preferences!.columns, overview: cols } })}
+          locked={LOCKED_COLUMNS}
         />
         <ExportPresetManager
           currentColumns={stored}

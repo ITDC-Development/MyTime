@@ -36,6 +36,7 @@ export function AssignJiraDialog({ open, user, onClose }: Props) {
     try {
       await updateDoc(doc(firestore, 'users', user.uid), {
         jiraAccountId: selected?.accountId ?? null,
+        jiraDisplayName: selected?.displayName ?? null,
       });
       onClose();
     } catch (e) {

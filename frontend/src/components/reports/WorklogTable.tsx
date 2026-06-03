@@ -1,4 +1,4 @@
-import { Table, TableBody, TableCell, TableHead, TableRow, IconButton, Box, Typography } from '@mui/material';
+import { Table, TableBody, TableCell, TableHead, TableRow, IconButton, Box, Typography, Chip } from '@mui/material';
 import { Edit, History as HistoryIcon } from '@mui/icons-material';
 import { LinearWorklog } from '../../types/worklog';
 import { formatDateShort } from '../../utils/dateUtils';
@@ -35,7 +35,9 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
       </TableHead>
       <TableBody>
         {rows.map((row, idx) => {
-          const bg = row.isPause ? BRAND.cream
+          const bg = row.isAbsence && row.absenceType === 'SICK_LEAVE' ? 'rgba(76,175,80,0.15)'
+            : row.isAbsence ? 'rgba(33,150,243,0.13)'
+            : row.isPause ? BRAND.cream
             : (showOvertime && row.isOvertime) ? 'rgba(186,117,23,0.10)'
             : row.isEdited ? 'rgba(44,140,153,0.06)' : 'inherit';
           return (
@@ -43,12 +45,12 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
               {columns.map(c => <TableCell key={c}>{cellValue(row, c, showOvertime)}</TableCell>)}
               {(onEdit || onHistory) && (
                 <TableCell align="right">
-                  {!row.isPause && !isLocked && onEdit && (
+                  {!row.isPause && !row.isAbsence && !isLocked && onEdit && (
                     <IconButton size="small" onClick={() => onEdit(row)}>
                       <Edit fontSize="small" />
                     </IconButton>
                   )}
-                  {!row.isPause && onHistory && (
+                  {!row.isPause && !row.isAbsence && onHistory && (
                     <IconButton size="small" onClick={() => onHistory(row)}>
                       <HistoryIcon fontSize="small" />
                     </IconButton>
@@ -67,7 +69,30 @@ function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
   switch (col) {
     case 'user': return row.user;
     case 'date': return formatDateShort(row.date);
-    case 'period': return formatPeriod(row.startMinutes, row.endMinutes);
+    case 'period': {
+      const period = formatPeriod(row.startMinutes, row.endMinutes);
+      if (row.isAbsence) {
+        const isSick = row.absenceType === 'SICK_LEAVE';
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <span>{period}</span>
+            <Chip size="small" label={isSick ? 'Nemoc' : 'Dovolená'}
+              sx={{ height: 18, fontSize: 11, fontWeight: 600,
+                backgroundColor: isSick ? 'rgba(76,175,80,0.25)' : 'rgba(33,150,243,0.22)',
+                color: isSick ? '#2e7d32' : '#1565c0' }} />
+          </Box>
+        );
+      }
+      if (showOvertime && row.isOvertime) {
+        return (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+            <span>{period}</span>
+            <OvertimeBadge />
+          </Box>
+        );
+      }
+      return period;
+    }
     case 'issue':
       if (row.isPause) return <Box component="span" sx={{ fontStyle: 'italic' }}>{row.summary}</Box>;
       return (

@@ -24,7 +24,7 @@ import { ManualWorklogDialog } from '../components/reports/ManualWorklogDialog';
 import { HistoryDialog } from '../components/reports/HistoryDialog';
 import { exportPdf, type PdfSummaryItem } from '../services/exporters/pdfExporter';
 import type { LinearWorklog } from '../types/worklog';
-import type { ColumnId } from '../types/export';
+import { type ColumnId, LOCKED_COLUMNS } from '../types/export';
 import type { Absence } from '../types/jira';
 
 export function ProjectReportPage() {
@@ -52,15 +52,6 @@ export function ProjectReportPage() {
   const accountId = selected[0] ?? null;
   const { linear } = useWorklogs({ accountIds, year, month });
 
-  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
-  useEffect(() => {
-    if (isAdmin && accountIds === null && linear.length > 0) {
-      setJiraUsers(
-        Array.from(new Map(linear.map(w => [w.accountId, { accountId: w.accountId, name: w.user }])).values())
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-  }, [linear, accountIds, isAdmin]);
 
   // Absence pro výpočet fondu (jen pro freelancera)
   const [absences, setAbsences] = useState<Absence[]>([]);
@@ -95,7 +86,11 @@ export function ProjectReportPage() {
   const workedHours = useMemo(() => totalWorkedHours(linear), [linear]);
 
   const showPauses = preferences?.showPauses ?? true;
-  const columns: ColumnId[] = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
+  const columns: ColumnId[] = useMemo(() => {
+    const stored = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
+    const missing = LOCKED_COLUMNS.filter(c => !stored.includes(c));
+    return missing.length ? [...missing, ...stored] : stored;
+  }, [preferences]);
   const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
   const selectedUser = users.find(u => u.jiraAccountId === accountId);
@@ -132,13 +127,14 @@ export function ProjectReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin && <UserSelect jiraUsers={jiraUsers} value={selected} onChange={handleSelectionChange} />}
+          {isAdmin && <UserSelect users={users} value={selected} onChange={handleSelectionChange} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
           <ColumnPickerDropdown
             selected={columns}
             onChange={cols => update({ columns: { ...preferences!.columns, projectReport: cols } })}
             exclude={['overtime']}
+            locked={LOCKED_COLUMNS}
           />
         </Stack>
 

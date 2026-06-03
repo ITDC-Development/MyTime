@@ -23,7 +23,7 @@ export function HistoryPage() {
 
   const employeesInLog = useMemo(() => {
     const map = new Map<string, string>();
-    users.filter(u => u.jiraAccountId).forEach(u => map.set(u.jiraAccountId!, u.displayName));
+    users.filter(u => u.jiraAccountId).forEach(u => map.set(u.jiraAccountId!, u.jiraDisplayName || u.displayName));
     entries.forEach(e => { if (e.accountId && e.user && !map.has(e.accountId)) map.set(e.accountId, e.user); });
     return Array.from(map.entries()).map(([accountId, name]) => ({ accountId, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [entries, users]);

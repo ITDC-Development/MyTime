@@ -5,6 +5,7 @@ export interface UserProfile {
   role: 'admin' | 'user' | 'freelancer';
   status: 'pending' | 'active' | 'blocked';
   jiraAccountId: string | null;
+  jiraDisplayName?: string | null;
   createdAt: string;
   approvedAt: string | null;
   approvedBy: string | null;

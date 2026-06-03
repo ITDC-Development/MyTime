@@ -21,7 +21,7 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { WorklogEditDialog } from '../components/reports/WorklogEditDialog';
 import { HistoryDialog } from '../components/reports/HistoryDialog';
 import type { LinearWorklog } from '../types/worklog';
-import type { ColumnId } from '../types/export';
+import { type ColumnId, LOCKED_COLUMNS } from '../types/export';
 import type { Absence } from '../types/jira';
 
 export function CompanyReportPage() {
@@ -53,19 +53,10 @@ export function CompanyReportPage() {
     [users]
   );
 
-  const [jiraUsers, setJiraUsers] = useState<{ accountId: string; name: string }[]>([]);
-  useEffect(() => {
-    if (isAdmin && accountIds === null && linear.length > 0) {
-      setJiraUsers(
-        Array.from(new Map(
-          linear
-            .filter(w => !freelancerAccountIds.has(w.accountId))
-            .map(w => [w.accountId, { accountId: w.accountId, name: w.user }])
-        ).values())
-          .sort((a, b) => a.name.localeCompare(b.name))
-      );
-    }
-  }, [linear, accountIds, isAdmin, freelancerAccountIds]);
+  const nonFreelancerUsers = useMemo(
+    () => users.filter(u => u.role !== 'freelancer'),
+    [users]
+  );
 
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [absenceError, setAbsenceError] = useState<string | null>(null);
@@ -120,8 +111,64 @@ export function CompanyReportPage() {
     [linear, isAdmin, accountId, freelancerAccountIds]
   );
 
-  const columns: ColumnId[] = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
+  const absenceRows = useMemo(() =>
+    absences
+      .filter(a => a.type !== 'HOLIDAY')
+      .map(a => ({
+        worklogId: `absence-${a.id}`,
+        accountId: a.accountId,
+        user: a.user,
+        date: a.date,
+        startMinutes: 8 * 60,
+        endMinutes: 8 * 60 + a.hours * 60,
+        hours: a.hours,
+        summary: a.type === 'SICK_LEAVE' ? 'Nemoc' : 'Dovolená',
+        issueKey: '', parentKey: '', parentSummary: '', parentIssueType: '',
+        components: [], sprint: '', comment: '',
+        isOvertime: false, isPause: false, isEdited: false, isManual: false,
+        issueType: '', priority: '',
+        isAbsence: true as const,
+        absenceType: a.type,
+      })),
+    [absences]
+  );
+
+  const shiftedLinear = useMemo(() => {
+    const shiftByDate: Record<string, number> = {};
+    for (const a of absences) {
+      if (a.type !== 'HOLIDAY') {
+        shiftByDate[a.date] = (shiftByDate[a.date] ?? 0) + a.hours * 60;
+      }
+    }
+    return visibleLinear.map(row => {
+      const shift = shiftByDate[row.date] ?? 0;
+      if (shift === 0) return row;
+      return { ...row, startMinutes: row.startMinutes + shift, endMinutes: row.endMinutes + shift };
+    });
+  }, [visibleLinear, absences]);
+
+  const combinedRows = useMemo(() =>
+    [...shiftedLinear, ...absenceRows].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      if (a.isAbsence !== b.isAbsence) return a.isAbsence ? -1 : 1;
+      return a.startMinutes - b.startMinutes;
+    }),
+    [shiftedLinear, absenceRows]
+  );
+
+  const columns: ColumnId[] = useMemo(() => {
+    const stored = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
+    const missing = LOCKED_COLUMNS.filter(c => !stored.includes(c));
+    return missing.length ? [...missing, ...stored] : stored;
+  }, [preferences]);
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
+
+  const selectedUserName = useMemo(() => {
+    if (!accountId) return '';
+    return users.find(u => u.jiraAccountId === accountId)?.displayName
+      ?? linear.find(r => !r.isPause)?.user
+      ?? accountId;
+  }, [accountId, users, linear]);
 
   const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const pdfRows = linear
@@ -154,13 +201,14 @@ export function CompanyReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin && <UserSelect jiraUsers={jiraUsers} value={selected} onChange={ids => {
+          {isAdmin && <UserSelect users={nonFreelancerUsers} value={selected} onChange={ids => {
             const next = ids.slice(0, 1); setSelected(next); update({ lastSelectedUser: next[0] ?? null });
           }} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <ColumnPickerDropdown
             selected={columns}
             onChange={cols => update({ columns: { ...preferences!.columns, companyReport: cols } })}
+            locked={LOCKED_COLUMNS}
           />
         </Stack>
 
@@ -177,20 +225,20 @@ export function CompanyReportPage() {
                 <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
               </Grid>
             )}
-            {!isAdmin && accountId && (
+            {accountId && (
               <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
                 <Button
                   size="small"
                   variant="outlined"
                   startIcon={<PictureAsPdf />}
-                  onClick={() => exportPdf(pdfRows, `dochazka-${year}-${String(month).padStart(2, '0')}`, `Docházka – ${profile?.displayName} – ${monthLabel(year, month)}`, pdfSummary)}
+                  onClick={() => exportPdf(pdfRows, `dochazka-${year}-${String(month).padStart(2, '0')}`, `Docházka – ${selectedUserName} – ${monthLabel(year, month)}`, pdfSummary)}
                 >
                   Stáhnout PDF
                 </Button>
               </Stack>
             )}
             <WorklogTable
-              rows={visibleLinear}
+              rows={combinedRows}
               columns={columns}
               isLocked={isLocked || !isAdmin}
               showOvertime

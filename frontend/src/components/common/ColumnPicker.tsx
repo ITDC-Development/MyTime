@@ -1,11 +1,12 @@
 import { Box, Chip, Typography } from '@mui/material';
-import { Check } from '@mui/icons-material';
+import { Check, LockOutlined } from '@mui/icons-material';
 import { ALL_COLUMNS, ColumnId } from '../../types/export';
 
-interface Props { selected: ColumnId[]; onChange: (cols: ColumnId[]) => void; }
+interface Props { selected: ColumnId[]; onChange: (cols: ColumnId[]) => void; locked?: ColumnId[]; }
 
-export function ColumnPicker({ selected, onChange }: Props) {
+export function ColumnPicker({ selected, onChange, locked = [] }: Props) {
   const toggle = (id: ColumnId) => {
+    if (locked.includes(id)) return;
     onChange(selected.includes(id) ? selected.filter(c => c !== id) : [...selected, id]);
   };
   return (
@@ -15,16 +16,18 @@ export function ColumnPicker({ selected, onChange }: Props) {
       </Typography>
       <Box sx={{ display: 'flex', gap: 0.8, flexWrap: 'wrap' }}>
         {ALL_COLUMNS.map(c => {
-          const on = selected.includes(c.id);
+          const isLocked = locked.includes(c.id);
+          const on = selected.includes(c.id) || isLocked;
           return (
             <Chip
               key={c.id}
               size="small"
-              icon={on ? <Check sx={{ fontSize: 14 }} /> : undefined}
+              icon={on ? (isLocked ? <LockOutlined sx={{ fontSize: 14 }} /> : <Check sx={{ fontSize: 14 }} />) : undefined}
               label={c.label}
-              onClick={() => toggle(c.id)}
+              onClick={isLocked ? undefined : () => toggle(c.id)}
               color={on ? 'secondary' : 'default'}
               variant={on ? 'filled' : 'outlined'}
+              sx={isLocked ? { cursor: 'default' } : undefined}
             />
           );
         })}

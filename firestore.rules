@@ -66,15 +66,15 @@ service cloud.firestore {
 
     match /worklogs_edited/{worklogId} {
       allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
-      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
-      allow update: if isActiveUser() && ownJiraAccount(resource.data.accountId);
+      allow create: if isAdmin() || (isActiveUser() && ownJiraAccount(request.resource.data.accountId));
+      allow update: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
       allow delete: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
     }
 
     match /manual_worklogs/{worklogId} {
       allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
-      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
-      allow update: if isActiveUser() && ownJiraAccount(resource.data.accountId);
+      allow create: if isAdmin() || (isActiveUser() && ownJiraAccount(request.resource.data.accountId));
+      allow update: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
       allow delete: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
     }
 
@@ -90,10 +90,10 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Audit log: read own or admin, write own only
+    // Audit log: read own or admin, write own or admin
     match /audit_log/{logId} {
       allow read: if isAdmin() || (isActiveUser() && ownJiraAccount(resource.data.accountId));
-      allow create: if isActiveUser() && ownJiraAccount(request.resource.data.accountId);
+      allow create: if isAdmin() || (isActiveUser() && ownJiraAccount(request.resource.data.accountId));
     }
 
     // Sync log: admin only

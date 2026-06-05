@@ -1,10 +1,8 @@
 import { Router } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { authenticate } from '../middleware/auth';
 import { logger } from '../utils/logger';
 
 const router = Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export interface SmartReportRequest {
   worklogs: {
@@ -34,118 +32,143 @@ export interface SmartReportResponse {
   rows: SmartReportRow[];
 }
 
-const DIMENSION_LABELS: Record<string, string> = {
-  user: 'Uživatel',
-  issueKey: 'Issue',
-  parentKey: 'Parent',
-  parentSummary: 'Projekt',
-  sprint: 'Sprint',
-  components: 'Komponenta',
-  issueType: 'Typ',
-  priority: 'Priorita',
-};
+type TimeGrouping = SmartReportRequest['timeGrouping'];
+
+const CZECH_MONTHS = [
+  'Leden','Únor','Březen','Duben','Květen','Červen',
+  'Červenec','Srpen','Září','Říjen','Listopad','Prosinec',
+];
+
+function isoWeekData(date: Date): { week: number; year: number } {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return { week, year: d.getUTCFullYear() };
+}
+
+function getTimePeriodKey(dateStr: string, grouping: TimeGrouping): string {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1;
+  switch (grouping) {
+    case 'day': return dateStr;
+    case 'week': {
+      const { week, year } = isoWeekData(d);
+      return `${year}-W${String(week).padStart(2, '0')}`;
+    }
+    case 'month': return `${y}-${String(m).padStart(2, '0')}`;
+    case 'quarter': return `${y}-Q${Math.ceil(m / 3)}`;
+    case 'year': return String(y);
+  }
+}
+
+function getTimePeriodLabel(key: string, grouping: TimeGrouping): string {
+  switch (grouping) {
+    case 'day': {
+      const [, m, d] = key.split('-');
+      return `${parseInt(d)}. ${parseInt(m)}.`;
+    }
+    case 'week': {
+      const [y, w] = key.split('-W');
+      return `T${parseInt(w)} '${y.slice(2)}`;
+    }
+    case 'month': {
+      const [y, m] = key.split('-');
+      return `${CZECH_MONTHS[parseInt(m) - 1]} '${y.slice(2)}`;
+    }
+    case 'quarter': {
+      const [y, q] = key.split('-Q');
+      return `Q${q} ${y}`;
+    }
+    case 'year': return key;
+  }
+}
+
+function generateColumns(from: string, to: string, grouping: TimeGrouping): { key: string; label: string }[] {
+  const result: { key: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const cur = new Date(from + 'T00:00:00Z');
+  const end = new Date(to + 'T00:00:00Z');
+  while (cur <= end) {
+    const key = getTimePeriodKey(cur.toISOString().slice(0, 10), grouping);
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push({ key, label: getTimePeriodLabel(key, grouping) });
+    }
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return result;
+}
+
+function getDimensionValue(w: SmartReportRequest['worklogs'][0], dim: string): string {
+  switch (dim) {
+    case 'user':          return w.user || '—';
+    case 'issueKey':      return w.issueKey || '—';
+    case 'parentKey':     return w.parentKey || '—';
+    case 'parentSummary': return w.parentSummary || '—';
+    case 'sprint':        return w.sprint || '—';
+    case 'components':    return w.components.join(', ') || '—';
+    case 'issueType':     return w.issueType || '—';
+    case 'priority':      return w.priority || '—';
+    default:              return '—';
+  }
+}
+
+function aggregate(body: SmartReportRequest): SmartReportResponse {
+  const { worklogs, dimensions, timeGrouping, dateRange } = body;
+  const columns = generateColumns(dateRange.from, dateRange.to, timeGrouping);
+  const colKeySet = new Set(columns.map(c => c.key));
+
+  const rowMap = new Map<string, { dimValues: Record<string, string>; totals: Map<string, number> }>();
+
+  for (const w of worklogs) {
+    const colKey = getTimePeriodKey(w.date, timeGrouping);
+    if (!colKeySet.has(colKey)) continue;
+
+    const dimValues: Record<string, string> = {};
+    for (const dim of dimensions) dimValues[dim] = getDimensionValue(w, dim);
+
+    const rowKey = dimensions.map(d => dimValues[d]).join('\x00');
+    if (!rowMap.has(rowKey)) rowMap.set(rowKey, { dimValues, totals: new Map() });
+
+    const entry = rowMap.get(rowKey)!;
+    entry.totals.set(colKey, (entry.totals.get(colKey) ?? 0) + w.seconds);
+  }
+
+  const rows: SmartReportRow[] = Array.from(rowMap.values())
+    .map(({ dimValues, totals }) => {
+      const _values: Record<string, number> = {};
+      for (const [colKey, seconds] of totals.entries()) {
+        _values[colKey] = Math.round(seconds / 36) / 100; // sekund → hodiny, 2 des. místa
+      }
+      return { ...dimValues, _values } as SmartReportRow;
+    })
+    .sort((a, b) => {
+      for (const dim of dimensions) {
+        const cmp = (a[dim] ?? '').localeCompare(b[dim] ?? '', 'cs');
+        if (cmp !== 0) return cmp;
+      }
+      return 0;
+    });
+
+  return { columns, rows };
+}
 
 router.post('/', authenticate, async (req, res) => {
   const body = req.body as SmartReportRequest;
-
   if (!body.worklogs || !body.dimensions || !body.timeGrouping || !body.dateRange) {
     return res.status(400).json({ error: 'Chybí povinná pole' });
   }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY není nastaven' });
-  }
-
-  const agentId = process.env.MANAGED_AGENT_ID?.trim();
-  const envId = process.env.MANAGED_ENV_ID?.trim();
-
-  if (!agentId || !envId) {
-    logger.warn('Managed agent IDs not configured, falling back to direct API');
-    return fallbackToDirectApi(body, res);
-  }
-
   try {
-    const session = await client.beta.sessions.create({
-      agent: { type: 'agent', id: agentId },
-      environment_id: envId,
-    });
-
-    const userMessage = buildUserMessage(body);
-    let fullText = '';
-
-    await Promise.all([
-      (async () => {
-        const stream = await client.beta.sessions.events.stream(session.id);
-        for await (const event of stream) {
-          if (event.type === 'agent.message') {
-            for (const block of event.content) {
-              if (block.type === 'text') fullText += block.text;
-            }
-          }
-          if (event.type === 'session.status_idle' || event.type === 'session.status_terminated') {
-            break;
-          }
-        }
-      })(),
-      client.beta.sessions.events.send(session.id, {
-        events: [{ type: 'user.message', content: [{ type: 'text', text: userMessage }] }],
-      }),
-    ]);
-
-    client.beta.sessions.archive(session.id).catch(() => {});
-
-    return parseAndRespond(fullText, res);
+    const result = aggregate(body);
+    logger.info('Smart report sestaven', { worklogs: body.worklogs.length, rows: result.rows.length });
+    return res.json(result);
   } catch (err: any) {
-    logger.error('Smart reports (managed agent) error', { err: err.message });
+    logger.error('Smart report chyba', { err: err.message });
     return res.status(500).json({ error: err.message });
   }
 });
-
-async function fallbackToDirectApi(body: SmartReportRequest, res: any) {
-  try {
-    const message = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 8192,
-      messages: [{ role: 'user', content: buildUserMessage(body) }],
-    });
-
-    const text = message.content[0].type === 'text' ? message.content[0].text : '';
-    return parseAndRespond(text, res);
-  } catch (err: any) {
-    logger.error('Smart reports (direct API) error', { err: err.message });
-    return res.status(500).json({ error: err.message });
-  }
-}
-
-function parseAndRespond(text: string, res: any) {
-  const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```/) ?? text.match(/(\{[\s\S]*\})/);
-  if (!jsonMatch) {
-    logger.error('Agent nevrátil JSON', { text: text.slice(0, 500) });
-    return res.status(500).json({ error: 'Agent nevrátil validní JSON' });
-  }
-  try {
-    const parsed: SmartReportResponse = JSON.parse(jsonMatch[1]);
-    return res.json(parsed);
-  } catch (err: any) {
-    logger.error('JSON parse error', { err: err.message, text: text.slice(0, 500) });
-    return res.status(500).json({ error: 'Chyba při parsování JSON odpovědi' });
-  }
-}
-
-function buildUserMessage(body: SmartReportRequest): string {
-  const { worklogs, dimensions, timeGrouping, dateRange } = body;
-  const dimLabels = dimensions.map(d => DIMENSION_LABELS[d] ?? d).join(', ');
-
-  return `**Konfigurace přehledu:**
-- Dimenze řádků (v tomto pořadí): ${dimensions.join(', ')} (${dimLabels})
-- Časové seskupení sloupců: ${timeGrouping}
-- Období: ${dateRange.from} až ${dateRange.to}
-
-**Worklogy (${worklogs.length} záznamů):**
-\`\`\`json
-${JSON.stringify(worklogs.slice(0, 500), null, 0)}
-\`\`\`
-${worklogs.length > 500 ? `\n(Zobrazeno prvních 500 z ${worklogs.length} záznamů.)` : ''}`;
-}
 
 export default router;

@@ -35,8 +35,8 @@ export function OverviewPage() {
   const showPauses = preferences?.showPauses ?? true;
   const stored = useMemo(() => {
     const prefs = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'name', 'hours'];
-    const missing = LOCKED_COLUMNS.filter(c => !prefs.includes(c));
-    return missing.length ? [...missing, ...prefs] : prefs;
+    const nonLocked = prefs.filter(c => !LOCKED_COLUMNS.includes(c));
+    return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
 
   const columns = useMemo(() => {

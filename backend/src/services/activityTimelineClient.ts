@@ -147,6 +147,16 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
         });
       }
 
+      // LOG: temporary — ukaz pozice vsech memberu
+      if (page === 0) {
+        const positions = members.map((m: any) => ({
+          name: m.userRealName,
+          accountId: m.username,
+          position: m.personPosition?.positionNameLong ?? '(žádná)',
+        }));
+        logger.info('AT member positions', { positions });
+      }
+
       for (const member of members) {
         const accountId: string = member.username ?? '';
         const username: string = member.userRealName ?? member.username ?? '';

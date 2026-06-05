@@ -9,6 +9,7 @@ export interface AuditEntry {
   changedAt: string;
   changedBy: string;
   changedByEmail: string;
+  action?: string;
   before: Record<string, unknown>;
   after: Record<string, unknown>;
 }

@@ -90,7 +90,7 @@ export function EmployeeSummaryPage() {
     const vacationHours = absences.filter(a => a.type === 'VACATION' || a.type === 'DAY_OFF').reduce((sum, a) => sum + a.hours, 0);
     const sickHours = absences.filter(a => a.type === 'SICK_LEAVE').reduce((sum, a) => sum + a.hours, 0);
     const workedHours = totalWorkedHours(linear);
-    const overtimeHours = Math.max(0, workedHours + vacationHours + sickHours - expectedHours);
+    const overtimeHours = Math.max(0, workedHours + vacationHours - expectedHours);
     return {
       totalHours: workedHours,
       overtimeHours,

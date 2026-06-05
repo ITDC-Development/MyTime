@@ -110,6 +110,30 @@ async function fetchAllIssuesForRange(client: AxiosInstance, from: string, to: s
   return issues;
 }
 
+async function resolveEpic(
+  client: AxiosInstance,
+  parentKey: string,
+  cache: Map<string, { key: string; summary: string } | null>
+): Promise<{ key: string; summary: string } | null> {
+  if (cache.has(parentKey)) return cache.get(parentKey)!;
+  try {
+    const res = await client.get(`/rest/api/3/issue/${parentKey}`, {
+      params: { fields: 'parent,issuetype,summary' },
+    });
+    const grandparent = res.data?.fields?.parent;
+    const grandparentType = grandparent?.fields?.issuetype?.name ?? '';
+    const result = grandparentType === 'Epic'
+      ? { key: grandparent.key, summary: grandparent.fields?.summary ?? '' }
+      : null;
+    cache.set(parentKey, result);
+    return result;
+  } catch (err: any) {
+    logger.warn('Nelze načíst grandparent issue', { parentKey, err: err.message });
+    cache.set(parentKey, null);
+    return null;
+  }
+}
+
 async function fetchAllWorklogsForIssue(client: AxiosInstance, issueKey: string): Promise<any[]> {
   const PAGE_SIZE = 5000;
   const worklogs: any[] = [];
@@ -157,6 +181,7 @@ export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraW
 
   const seen = new Set<string>();
   const result: JiraWorklogResponse[] = [];
+  const epicCache = new Map<string, { key: string; summary: string } | null>();
 
   for (const chunk of chunks) {
     logger.info('Zpracovávám chunk', { from: chunk.from, to: chunk.to });
@@ -166,6 +191,24 @@ export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraW
 
     for (const issue of issues) {
       const worklogs = await fetchAllWorklogsForIssue(client, issue.key);
+
+      const directParentKey: string = issue.fields?.parent?.key ?? '';
+      const directParentSummary: string = issue.fields?.parent?.fields?.summary ?? '';
+      const directParentType: string = issue.fields?.parent?.fields?.issuetype?.name ?? '';
+
+      // Pokud přímý parent není Epic, dohledáme grandparent Epic
+      let epicKey = directParentKey;
+      let epicSummary = directParentSummary;
+      let epicType = directParentType;
+
+      if (directParentKey && directParentType && directParentType !== 'Epic') {
+        const grandparent = await resolveEpic(client, directParentKey, epicCache);
+        if (grandparent) {
+          epicKey = grandparent.key;
+          epicSummary = grandparent.summary;
+          epicType = 'Epic';
+        }
+      }
 
       for (const w of worklogs) {
         const started = w.started?.slice(0, 10) ?? '';
@@ -178,9 +221,9 @@ export async function fetchJiraWorklogs(from: string, to: string): Promise<JiraW
           user: w.author?.displayName ?? 'unknown',
           accountId: w.author?.accountId ?? 'unknown',
           summary: issue.fields?.summary ?? '',
-          parentKey: issue.fields?.parent?.key ?? '',
-          parentSummary: issue.fields?.parent?.fields?.summary ?? '',
-          parentIssueType: issue.fields?.parent?.fields?.issuetype?.name ?? '',
+          parentKey: epicKey,
+          parentSummary: epicSummary,
+          parentIssueType: epicType,
           components: (issue.fields?.components ?? []).map((c: any) => c.name),
           sprint: parseSprint(issue.fields?.customfield_10020),
           issueType: issue.fields?.issuetype?.name ?? '',

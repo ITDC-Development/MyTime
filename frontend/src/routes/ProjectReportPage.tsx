@@ -22,6 +22,8 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { WorklogEditDialog } from '../components/reports/WorklogEditDialog';
 import { ManualWorklogDialog } from '../components/reports/ManualWorklogDialog';
 import { HistoryDialog } from '../components/reports/HistoryDialog';
+import { deleteEditedWorklog } from '../components/services-bridge';
+import { logEdit } from '../services/firestore/auditLog';
 import { exportPdf, type PdfSummaryItem } from '../services/exporters/pdfExporter';
 import type { LinearWorklog } from '../types/worklog';
 import { type ColumnId, LOCKED_COLUMNS } from '../types/export';
@@ -43,6 +45,32 @@ export function ProjectReportPage() {
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+
+  const handleDeleteEdit = async (worklog: LinearWorklog) => {
+    if (!profile) return;
+    await deleteEditedWorklog(worklog.worklogId);
+    await logEdit({
+      worklogId: worklog.worklogId,
+      user: worklog.user,
+      accountId: worklog.accountId,
+      changedAt: new Date().toISOString(),
+      changedBy: profile.uid,
+      changedByEmail: profile.email,
+      action: 'revert',
+      before: {
+        seconds: Math.round(worklog.hours * 3600),
+        date: worklog.date,
+        issueKey: worklog.issueKey,
+        summary: worklog.summary,
+        parentKey: worklog.parentKey,
+        parentSummary: worklog.parentSummary,
+        sprint: worklog.sprint,
+        components: worklog.components,
+        comment: worklog.comment,
+      },
+      after: {},
+    });
+  };
 
   useEffect(() => {
     if (isFreelancer && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
@@ -88,8 +116,8 @@ export function ProjectReportPage() {
   const showPauses = preferences?.showPauses ?? true;
   const columns: ColumnId[] = useMemo(() => {
     const stored = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
-    const missing = LOCKED_COLUMNS.filter(c => !stored.includes(c));
-    return missing.length ? [...missing, ...stored] : stored;
+    const nonLocked = stored.filter(c => !LOCKED_COLUMNS.includes(c));
+    return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
   const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
@@ -164,7 +192,7 @@ export function ProjectReportPage() {
                   onClick={() => exportPdf(
                     pdfRows,
                     `projektovy-vyzkaz-${year}-${String(month).padStart(2, '0')}`,
-                    `Projektový výkaz – ${profile?.displayName} – ${monthLabel(year, month)}`,
+                    `Projektový výkaz – ${selectedUser?.jiraDisplayName || selectedUser?.displayName || profile?.displayName} – ${monthLabel(year, month)}`,
                     pdfSummary
                   )}
                 >
@@ -179,6 +207,7 @@ export function ProjectReportPage() {
               isLocked={isLocked || !isAdmin}
               onEdit={r => setEditTarget(r)}
               onHistory={r => setHistoryTarget(r)}
+              onDeleteEdit={handleDeleteEdit}
             />
             {isAdmin && (
               <Stack direction="row" spacing={1} sx={{ mt: 2 }}>

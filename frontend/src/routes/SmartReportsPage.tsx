@@ -11,7 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { UserSelect } from '../components/common/UserSelect';
 import { api } from '../services/api';
 import { ExportButtons } from '../components/export/ExportButtons';
-import type { RawWorklog } from '../types/worklog';
+import type { RawWorklog, EditedWorklog, ManualWorklog } from '../types/worklog';
 
 type SmartReportRow = { _values: Record<string, number> } & Record<string, string>;
 interface SmartReportResponse { columns: { key: string; label: string }[]; rows: SmartReportRow[]; }
@@ -91,28 +91,72 @@ export function SmartReportsPage() {
     setError(null);
 
     try {
-      // Admin načte všechna data; ostatní jen svá
-      const q = isAdmin
-        ? query(
-            collection(firestore, 'worklogs_raw'),
-            where('date', '>=', dateFrom),
-            where('date', '<=', dateTo),
-          )
-        : query(
-            collection(firestore, 'worklogs_raw'),
-            where('accountId', '==', ownAccountId ?? ''),
-            where('date', '>=', dateFrom),
-            where('date', '<=', dateTo),
-          );
+      const accountFilter = isAdmin ? null : ownAccountId ?? '';
 
-      const snap = await getDocs(q);
-      const worklogs = snap.docs.map(d => d.data() as RawWorklog);
-      setRawWorklogs(worklogs);
+      // Načti raw worklogy
+      const rawQ = accountFilter === null
+        ? query(collection(firestore, 'worklogs_raw'), where('date', '>=', dateFrom), where('date', '<=', dateTo))
+        : query(collection(firestore, 'worklogs_raw'), where('accountId', '==', accountFilter), where('date', '>=', dateFrom), where('date', '<=', dateTo));
+      const rawSnap = await getDocs(rawQ);
+      const raw = rawSnap.docs.map(d => d.data() as RawWorklog);
 
-      // Extrahuj všechny Jira uživatele (pro admin)
+      // Načti úpravy a sestav mapu
+      const editedSnap = await getDocs(collection(firestore, 'worklogs_edited'));
+      const editedMap: Record<string, EditedWorklog> = {};
+      editedSnap.docs.forEach(d => { editedMap[d.id] = d.data() as EditedWorklog; });
+
+      // Načti ruční záznamy
+      const manualQ = accountFilter === null
+        ? query(collection(firestore, 'manual_worklogs'), where('date', '>=', dateFrom), where('date', '<=', dateTo))
+        : query(collection(firestore, 'manual_worklogs'), where('accountId', '==', accountFilter), where('date', '>=', dateFrom), where('date', '<=', dateTo));
+      const manualSnap = await getDocs(manualQ);
+      const manual = manualSnap.docs.map(d => d.data() as ManualWorklog);
+
+      // Aplikuj overlay úprav na raw worklogy
+      const merged: RawWorklog[] = raw.map(r => {
+        const e = editedMap[r.worklogId];
+        if (!e) return r;
+        return {
+          ...r,
+          seconds: e.seconds ?? r.seconds,
+          date: e.date ?? r.date,
+          summary: e.summary ?? r.summary,
+          issueKey: e.issueKey ?? r.issueKey,
+          parentKey: e.parentKey ?? r.parentKey,
+          parentSummary: e.parentSummary ?? r.parentSummary,
+          components: e.components ?? r.components,
+          sprint: e.sprint ?? r.sprint,
+          comment: e.comment ?? r.comment,
+        };
+      });
+
+      // Přidej ruční záznamy jako RawWorklog
+      for (const m of manual) {
+        merged.push({
+          worklogId: m.id,
+          user: m.user,
+          accountId: m.accountId,
+          summary: m.summary,
+          parentKey: m.parentKey ?? '',
+          parentSummary: m.parentSummary ?? '',
+          parentIssueType: '',
+          components: m.components ?? [],
+          sprint: m.sprint ?? '',
+          comment: m.comment,
+          seconds: m.seconds,
+          started: `${m.date}T00:00:00.000Z`,
+          issueKey: '',
+          date: m.date,
+          issueType: '',
+          priority: '',
+        });
+      }
+
+      setRawWorklogs(merged);
+
       if (isAdmin) {
         const map = new Map<string, string>();
-        for (const w of worklogs) {
+        for (const w of merged) {
           if (w.accountId) map.set(w.accountId, w.user || w.accountId);
         }
         setJiraUsers(
@@ -153,6 +197,16 @@ export function SmartReportsPage() {
     }
 
     const dimensions = [dim1, dim2, dim3 !== NONE ? dim3 : null].filter(Boolean) as string[];
+
+    // Worklogy bez Epic parenta se nepřiřadí k žádnému projektu (parentKey/Summary = '')
+    // ale stále se počítají — zobrazí se jako "—" v tabulce
+    if (dimensions.some(d => d === 'parentSummary' || d === 'parentKey')) {
+      filtered = filtered.map(w =>
+        w.parentIssueType !== 'Epic'
+          ? { ...w, parentKey: '', parentSummary: '' }
+          : w
+      );
+    }
 
     try {
       const res = await api<SmartReportResponse>('/smart-reports', {
@@ -195,7 +249,7 @@ export function SmartReportsPage() {
     const map = new Map<string, string>();
     for (const w of source) {
       // Zobraz Epic, nebo starý záznam bez parentIssueType (před synchem s novým polem)
-      if (w.parentKey && (w.parentIssueType === 'Epic' || !w.parentIssueType)) {
+      if (w.parentKey && w.parentIssueType === 'Epic') {
         map.set(w.parentKey, w.parentSummary || w.parentKey);
       }
     }

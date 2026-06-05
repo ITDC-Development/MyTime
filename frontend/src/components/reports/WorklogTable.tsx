@@ -1,5 +1,5 @@
-import { Table, TableBody, TableCell, TableHead, TableRow, IconButton, Box, Typography, Chip } from '@mui/material';
-import { Edit, History as HistoryIcon } from '@mui/icons-material';
+import { Table, TableBody, TableCell, TableHead, TableRow, IconButton, Box, Typography, Chip, Tooltip } from '@mui/material';
+import { Edit, History as HistoryIcon, Restore } from '@mui/icons-material';
 import { LinearWorklog } from '../../types/worklog';
 import { formatDateShort } from '../../utils/dateUtils';
 import { formatPeriod, formatHours } from '../../utils/formatters';
@@ -14,6 +14,7 @@ interface Props {
   showOvertime?: boolean;
   onEdit?: (row: LinearWorklog) => void;
   onHistory?: (row: LinearWorklog) => void;
+  onDeleteEdit?: (row: LinearWorklog) => void;
 }
 
 const LABELS: Record<ColumnId, string> = {
@@ -21,7 +22,7 @@ const LABELS: Record<ColumnId, string> = {
   sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas',
 };
 
-export function WorklogTable({ rows, columns, isLocked, showOvertime = false, onEdit, onHistory }: Props) {
+export function WorklogTable({ rows, columns, isLocked, showOvertime = false, onEdit, onHistory, onDeleteEdit }: Props) {
   if (rows.length === 0) {
     return <Typography color="text.secondary" sx={{ py: 3 }}>Žádné worklogy v tomto období.</Typography>;
   }
@@ -30,7 +31,7 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
       <TableHead>
         <TableRow>
           {columns.map(c => <TableCell key={c}>{LABELS[c]}</TableCell>)}
-          {(onEdit || onHistory) && <TableCell align="right">Akce</TableCell>}
+          {(onEdit || onHistory || onDeleteEdit) && <TableCell align="right">Akce</TableCell>}
         </TableRow>
       </TableHead>
       <TableBody>
@@ -43,7 +44,7 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
           return (
             <TableRow key={`${row.worklogId}-${idx}`} sx={{ backgroundColor: bg }}>
               {columns.map(c => <TableCell key={c}>{cellValue(row, c, showOvertime)}</TableCell>)}
-              {(onEdit || onHistory) && (
+              {(onEdit || onHistory || onDeleteEdit) && (
                 <TableCell align="right">
                   {!row.isPause && !row.isAbsence && !isLocked && onEdit && (
                     <IconButton size="small" onClick={() => onEdit(row)}>
@@ -54,6 +55,13 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
                     <IconButton size="small" onClick={() => onHistory(row)}>
                       <HistoryIcon fontSize="small" />
                     </IconButton>
+                  )}
+                  {!row.isPause && !row.isAbsence && !isLocked && row.isEdited && onDeleteEdit && (
+                    <Tooltip title="Smazat úpravu">
+                      <IconButton size="small" color="warning" onClick={() => onDeleteEdit(row)}>
+                        <Restore fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
                   )}
                 </TableCell>
               )}

@@ -35,7 +35,7 @@ export function HistoryDialog({ open, worklogId, onClose }: Props) {
                 <ListItem>
                   <ListItemText
                     primary={`${dayjs(e.changedAt).format('DD. MM. YYYY HH:mm')} · ${e.changedByEmail}`}
-                    secondary={renderDiff(e.before, e.after)}
+                    secondary={e.action === 'revert' ? 'Úprava smazána – obnoveno na původní hodnoty' : renderDiff(e.before, e.after)}
                   />
                 </ListItem>
                 {idx < entries.length - 1 && <Divider component="li" />}

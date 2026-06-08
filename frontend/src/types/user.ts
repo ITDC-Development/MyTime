@@ -1,3 +1,9 @@
+export interface Member {
+  accountId: string;
+  displayName: string;
+  role: 'user' | 'freelancer';
+}
+
 export interface UserProfile {
   uid: string;
   email: string;

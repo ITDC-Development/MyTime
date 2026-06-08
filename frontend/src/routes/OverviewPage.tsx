@@ -1,12 +1,13 @@
 import { useState, useMemo } from 'react';
-import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
+import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Checkbox } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
+import { useMembers } from '../hooks/useMembers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { usePreferences } from '../hooks/usePreferences';
 import { currentMonth, monthLabel } from '../utils/dateUtils';
 import { filterPauses } from '../utils/pauseRules';
-import { formatPeriod, formatHours } from '../utils/formatters';
+import { minutesToHHMM, formatHours } from '../utils/formatters';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
 import { PauseToggle } from '../components/common/PauseToggle';
@@ -22,6 +23,7 @@ import dayjs from 'dayjs';
 export function OverviewPage() {
   const { profile } = useAuth();
   const { users } = useUsers();
+  const { members } = useMembers();
   const { preferences, update } = usePreferences();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
@@ -34,8 +36,9 @@ export function OverviewPage() {
   const { linear } = useWorklogs({ accountIds, year, month });
   const showPauses = preferences?.showPauses ?? true;
   const stored = useMemo(() => {
-    const prefs = (preferences?.columns.overview as ColumnId[]) ?? ['user', 'date', 'period', 'issue', 'name', 'hours'];
-    const nonLocked = prefs.filter(c => !LOCKED_COLUMNS.includes(c));
+    const raw = (preferences?.columns.overview as string[]) ?? ['user', 'date', 'from', 'to', 'issue', 'name', 'hours'];
+    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
     return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
 
@@ -89,6 +92,7 @@ export function OverviewPage() {
   };
 
   const [confirmExport, setConfirmExport] = useState<null | (() => void)>(null);
+  const [lockOnExport, setLockOnExport] = useState(true);
 
   const presets: ExportPreset[] = preferences?.exportPresets ?? [];
 
@@ -117,7 +121,7 @@ export function OverviewPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          <UserSelect users={users} value={selected} onChange={setSelected} multiple label="Uživatelé" />
+          <UserSelect jiraUsers={members.map(m => ({ accountId: m.accountId, name: m.displayName }))} value={selected} onChange={setSelected} multiple label="Uživatelé" />
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
         </Stack>
@@ -145,14 +149,9 @@ export function OverviewPage() {
                 Vybráno {selected.length} {selected.length === 1 ? 'zaměstnanec' : 'zaměstnanců'} · {filtered.filter(r => !r.isPause).length} worklogů
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center">
-                <Alert severity="warning" sx={{ py: 0 }}>Export zamkne období!</Alert>
                 <ExportButtons rows={rowsForExport} filename={filename} title={title} onExport={async () => {
                   return new Promise<void>(resolve => {
-                    setConfirmExport(() => async () => {
-                      await exportWithLock();
-                      setConfirmExport(null);
-                      resolve();
-                    });
+                    setConfirmExport(() => () => { resolve(); });
                   });
                 }} />
               </Stack>
@@ -164,14 +163,28 @@ export function OverviewPage() {
       <Dialog open={Boolean(confirmExport)} onClose={() => setConfirmExport(null)}>
         <DialogTitle>Potvrzení exportu</DialogTitle>
         <DialogContent>
-          <Typography>
-            Tento export uzamkne období <strong>{monthLabel(year, month)}</strong> proti dalšímu syncu i editacím
-            pro {selected.length} vybraných zaměstnanců. Pokračovat?
+          <Typography sx={{ mb: 2 }}>
+            Exportujete výkaz za <strong>{monthLabel(year, month)}</strong> pro {selected.length} {selected.length === 1 ? 'zaměstnance' : 'zaměstnanců'}.
           </Typography>
+          <FormControlLabel
+            control={<Checkbox checked={lockOnExport} onChange={e => setLockOnExport(e.target.checked)} />}
+            label={<>Zamknout období <strong>{monthLabel(year, month)}</strong> po exportu</>}
+          />
+          {lockOnExport && (
+            <Alert severity="warning" sx={{ mt: 1 }}>
+              Zamčené období nebude možné dále editovat ani synchronizovat.
+            </Alert>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirmExport(null)}>Zrušit</Button>
-          <Button variant="contained" onClick={() => confirmExport && confirmExport()}>Exportovat a zamknout</Button>
+          <Button variant="contained" onClick={async () => {
+            if (lockOnExport) await exportWithLock();
+            confirmExport && confirmExport();
+            setConfirmExport(null);
+          }}>
+            Exportovat
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
@@ -179,7 +192,7 @@ export function OverviewPage() {
 }
 
 function labelOf(c: ColumnId): string {
-  return { user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', name: 'Název', parent: 'Parent',
+  return { user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název', parent: 'Parent',
     sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas' }[c];
 }
 
@@ -201,7 +214,8 @@ function renderForExport(r: { user: string; date: string; startMinutes: number; 
   switch (c) {
     case 'user': return r.user;
     case 'date': return dayjs(r.date).format('DD. MM. YYYY');
-    case 'period': return formatPeriod(r.startMinutes, r.endMinutes);
+    case 'from': return minutesToHHMM(r.startMinutes);
+    case 'to': return minutesToHHMM(r.endMinutes);
     case 'issue': return r.isPause ? decodeHtml(r.summary) : (r.issueKey || '');
     case 'name': return r.isPause ? '' : decodeHtml(r.summary);
     case 'parent': return r.parentKey ? `${r.parentKey} ${decodeHtml(r.parentSummary)}` : '';

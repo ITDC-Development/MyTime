@@ -1,9 +1,10 @@
 export type ExportFormat = 'csv' | 'xlsx' | 'pdf';
-export type ColumnId = 'user' | 'date' | 'period' | 'issue' | 'name' | 'parent' | 'sprint' | 'component' | 'hours' | 'comment' | 'overtime';
-export const LOCKED_COLUMNS: ColumnId[] = ['date', 'period', 'name'];
+export type ColumnId = 'user' | 'date' | 'from' | 'to' | 'issue' | 'name' | 'parent' | 'sprint' | 'component' | 'hours' | 'comment' | 'overtime';
+export const LOCKED_COLUMNS: ColumnId[] = ['date', 'from', 'to', 'name'];
 export const ALL_COLUMNS: { id: ColumnId; label: string }[] = [
   { id: 'date', label: 'Datum' },
-  { id: 'period', label: 'Období' },
+  { id: 'from', label: 'Od' },
+  { id: 'to', label: 'Do' },
   { id: 'name', label: 'Název' },
   { id: 'issue', label: 'Issue' },
   { id: 'hours', label: 'Hodiny' },

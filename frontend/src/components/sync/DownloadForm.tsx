@@ -3,9 +3,18 @@ import { Stack, TextField, Button, Alert, Box } from '@mui/material';
 import { PlayArrow } from '@mui/icons-material';
 import { api } from '../../services/api';
 
+function lastMonthRange() {
+  const now = new Date();
+  return {
+    from: new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10),
+    to:   new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10),
+  };
+}
+
 export function DownloadForm() {
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
+  const defaultRange = lastMonthRange();
+  const [from, setFrom] = useState(defaultRange.from);
+  const [to, setTo] = useState(defaultRange.to);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

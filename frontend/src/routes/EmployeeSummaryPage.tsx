@@ -4,7 +4,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorklogs } from '../hooks/useWorklogs';
-import { useUsers } from '../hooks/useUsers';
+import { useMembers } from '../hooks/useMembers';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
 import { currentMonth, monthRange, formatDateFull } from '../utils/dateUtils';
@@ -33,7 +33,7 @@ export function EmployeeSummaryPage() {
   const [month, setMonth] = useState(curM);
 
   const isAdmin = profile?.role === 'admin';
-  const { users } = useUsers();
+  const { members } = useMembers();
   const ownAccount = profile?.jiraAccountId ?? null;
   const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
 
@@ -45,9 +45,9 @@ export function EmployeeSummaryPage() {
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
   const { linear } = useWorklogs({ accountIds, year, month });
 
-  const nonFreelancerUsers = useMemo(
-    () => users.filter(u => u.role !== 'freelancer'),
-    [users]
+  const employeeMembers = useMemo(
+    () => members.filter(m => m.role === 'user').map(m => ({ accountId: m.accountId, name: m.displayName })),
+    [members]
   );
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [absenceError, setAbsenceError] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export function EmployeeSummaryPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 3 }} alignItems={{ md: 'center' }}>
-          {isAdmin && <UserSelect users={nonFreelancerUsers} value={selected} onChange={ids => setSelected(ids.slice(0, 1))} />}
+          {isAdmin && <UserSelect jiraUsers={employeeMembers} value={selected} onChange={ids => setSelected(ids.slice(0, 1))} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
         </Stack>
 

@@ -24,9 +24,9 @@ export async function createAccount(
     preferences: {
       showPauses: true,
       columns: {
-        projectReport: ['date', 'period', 'issue', 'hours'],
-        companyReport: ['date', 'period', 'issue', 'hours'],
-        overview: ['user', 'date', 'period', 'issue', 'hours'],
+        projectReport: ['date', 'from', 'to', 'issue', 'hours'],
+        companyReport: ['date', 'from', 'to', 'issue', 'hours'],
+        overview: ['user', 'date', 'from', 'to', 'issue', 'hours'],
       },
       lastSelectedUser: null,
       exportPresets: [],

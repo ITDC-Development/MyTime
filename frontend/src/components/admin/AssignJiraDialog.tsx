@@ -3,7 +3,7 @@ import {
   Dialog, DialogTitle, DialogContent, DialogActions,
   Button, Autocomplete, TextField, Stack, Alert, CircularProgress, Typography,
 } from '@mui/material';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { firestore } from '../../services/firebase';
 import { useJiraAccounts } from '../../hooks/useJiraAccounts';
 import type { UserProfile } from '../../types/user';
@@ -34,10 +34,18 @@ export function AssignJiraDialog({ open, user, onClose }: Props) {
     if (!user) return;
     setBusy(true); setError(null);
     try {
-      await updateDoc(doc(firestore, 'users', user.uid), {
+      const update: Record<string, unknown> = {
         jiraAccountId: selected?.accountId ?? null,
         jiraDisplayName: selected?.displayName ?? null,
-      });
+      };
+      // Automaticky nastav roli podle members kolekce (jen pro non-admin uživatele)
+      if (selected?.accountId && user.role !== 'admin') {
+        const memberSnap = await getDoc(doc(firestore, 'members', selected.accountId));
+        if (memberSnap.exists()) {
+          update.role = memberSnap.data().role;
+        }
+      }
+      await updateDoc(doc(firestore, 'users', user.uid), update);
       onClose();
     } catch (e) {
       setError(String(e));

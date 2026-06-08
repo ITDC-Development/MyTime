@@ -2,7 +2,7 @@ import { Table, TableBody, TableCell, TableHead, TableRow, IconButton, Box, Typo
 import { Edit, History as HistoryIcon, Restore } from '@mui/icons-material';
 import { LinearWorklog } from '../../types/worklog';
 import { formatDateShort } from '../../utils/dateUtils';
-import { formatPeriod, formatHours } from '../../utils/formatters';
+import { minutesToHHMM, formatHours } from '../../utils/formatters';
 import { OvertimeBadge } from '../common/OvertimeBadge';
 import { BRAND } from '../../theme';
 import { ColumnId } from '../../types/export';
@@ -18,7 +18,7 @@ interface Props {
 }
 
 const LABELS: Record<ColumnId, string> = {
-  user: 'Uživatel', date: 'Datum', period: 'Období', issue: 'Issue', name: 'Název', parent: 'Parent',
+  user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název', parent: 'Parent',
   sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas',
 };
 
@@ -77,13 +77,15 @@ function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
   switch (col) {
     case 'user': return row.user;
     case 'date': return formatDateShort(row.date);
-    case 'period': {
-      const period = formatPeriod(row.startMinutes, row.endMinutes);
+    case 'from':
+      return minutesToHHMM(row.startMinutes);
+    case 'to': {
+      const toTime = minutesToHHMM(row.endMinutes);
       if (row.isAbsence) {
         const isSick = row.absenceType === 'SICK_LEAVE';
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <span>{period}</span>
+            <span>{toTime}</span>
             <Chip size="small" label={isSick ? 'Nemoc' : 'Dovolená'}
               sx={{ height: 18, fontSize: 11, fontWeight: 600,
                 backgroundColor: isSick ? 'rgba(76,175,80,0.25)' : 'rgba(33,150,243,0.22)',
@@ -94,12 +96,12 @@ function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
       if (showOvertime && row.isOvertime) {
         return (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
-            <span>{period}</span>
+            <span>{toTime}</span>
             <OvertimeBadge />
           </Box>
         );
       }
-      return period;
+      return toTime;
     }
     case 'issue':
       if (row.isPause) return <Box component="span" sx={{ fontStyle: 'italic' }}>{row.summary}</Box>;

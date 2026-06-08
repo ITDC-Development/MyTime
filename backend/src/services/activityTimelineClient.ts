@@ -82,6 +82,74 @@ function generateMockAbsences(from: string, to: string): ActivityTimelineEvent[]
   return out;
 }
 
+export interface MemberRole {
+  accountId: string;
+  displayName: string;
+  role: 'user' | 'freelancer';
+}
+
+function roleFromPosition(positionNameLong: string | undefined): 'user' | 'freelancer' {
+  // Pouze explicitní "Freelancer" pozice → freelancer, vše ostatní (Zaměstnanec, Praktikant, ...) → user
+  if (positionNameLong?.toLowerCase() === 'freelancer') return 'freelancer';
+  return 'user';
+}
+
+export async function fetchMemberRoles(from: string, to: string): Promise<MemberRole[]> {
+  if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) {
+    return [
+      { accountId: 'acc-tomas', displayName: 'Tomáš Kraus', role: 'user' },
+      { accountId: 'acc-hana', displayName: 'Hana Nová', role: 'user' },
+    ];
+  }
+
+  const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
+  const token = process.env.ACTIVITY_TIMELINE_AUTH_TOKEN!.trim();
+  const teamIds = (process.env.ACTIVITY_TIMELINE_TEAM_IDS ?? '').trim()
+    .split(',').map(s => s.trim()).filter(Boolean);
+
+  if (teamIds.length === 0) return [];
+
+  const seen = new Set<string>();
+  const roles: MemberRole[] = [];
+
+  for (const teamId of teamIds) {
+    let startAt = 0;
+    let page = 0;
+
+    while (true) {
+      const params = new URLSearchParams({
+        start: from, end: to, teamId,
+        'auth-token': token,
+        maxResults: String(PAGE_SIZE),
+        startAt: String(startAt),
+      });
+
+      const response = await axios.get(`${baseUrl}/rest/api/1/timeline?${params.toString()}`);
+      const raw = response.data;
+      const members: any[] = raw?.members ?? [];
+      const hasMore: boolean = raw?.hasMore ?? false;
+      const total: number | undefined = raw?.total;
+
+      for (const member of members) {
+        const accountId: string = member.username ?? '';
+        if (!accountId || seen.has(accountId)) continue;
+        seen.add(accountId);
+        const displayName: string = member.userRealName ?? member.username ?? accountId;
+        roles.push({ accountId, displayName, role: roleFromPosition(member.personPosition?.positionNameLong) });
+      }
+
+      const fetched = startAt + members.length;
+      if (members.length === 0 || (!hasMore && (total === undefined || fetched >= total))) break;
+      startAt += PAGE_SIZE;
+      page++;
+      if (page >= 50) break;
+    }
+  }
+
+  logger.info('AT member roles načteny', { total: roles.length, freelancers: roles.filter(r => r.role === 'freelancer').length });
+  return roles;
+}
+
 export async function fetchAbsences(from: string, to: string, type?: ActivityTimelineEvent['type']): Promise<ActivityTimelineEvent[]> {
   if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) {
     logger.info('Načítám mock absence z Activity Timeline', { from, to });

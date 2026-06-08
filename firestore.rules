@@ -102,6 +102,12 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Members (AT directory): readable by all active users, writable only by backend
+    match /members/{memberId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
     // Sync settings: admin only
     match /sync_settings/{settingId} {
       allow read: if isActiveUser();

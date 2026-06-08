@@ -5,6 +5,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
+import { useMembers } from '../hooks/useMembers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
 import { usePreferences } from '../hooks/usePreferences';
@@ -35,6 +36,7 @@ export function ProjectReportPage() {
   const isFreelancer = profile?.role === 'freelancer';
   const ownAccount = profile?.jiraAccountId ?? null;
   const { users } = useUsers();
+  const { members } = useMembers();
   const { preferences, update } = usePreferences();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
@@ -115,8 +117,9 @@ export function ProjectReportPage() {
 
   const showPauses = preferences?.showPauses ?? true;
   const columns: ColumnId[] = useMemo(() => {
-    const stored = (preferences?.columns.projectReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
-    const nonLocked = stored.filter(c => !LOCKED_COLUMNS.includes(c));
+    const raw = (preferences?.columns.projectReport as string[]) ?? ['date', 'from', 'to', 'issue', 'name', 'hours'];
+    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
     return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
   const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
@@ -155,7 +158,7 @@ export function ProjectReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin && <UserSelect users={users} value={selected} onChange={handleSelectionChange} />}
+          {isAdmin && <UserSelect jiraUsers={members.map(m => ({ accountId: m.accountId, name: m.displayName }))} value={selected} onChange={handleSelectionChange} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
           <ColumnPickerDropdown

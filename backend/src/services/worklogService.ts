@@ -1,6 +1,6 @@
 import { db } from './firestoreClient';
 import { fetchJiraWorklogs, splitIntoMonths } from './jiraClient';
-import { fetchAbsences } from './activityTimelineClient';
+import { fetchAbsences, fetchMemberRoles } from './activityTimelineClient';
 import { isLocked } from './lockService';
 import { logger } from '../utils/logger';
 import type { RawWorklog, Absence } from '../types/worklog';
@@ -146,6 +146,42 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     logger.error('Activity Timeline selhalo', { atError, from: opts.from, to: opts.to });
   }
 
+  // Sync členů a rolí z AT (nekritická — chyba neblokuje výsledek syncu)
+  let rolesUpdated = 0;
+  try {
+    // Použijeme celý aktuální rok aby se načetli i členové bez aktivit v sync-periodě
+    const year = new Date().getUTCFullYear();
+    const memberRoles = await fetchMemberRoles(`${year}-01-01`, `${year}-12-31`);
+
+    // Uložit všechny AT členy do kolekce members (accountId jako ID dokumentu)
+    for (let i = 0; i < memberRoles.length; i += BATCH_LIMIT) {
+      const batch = db().batch();
+      for (const { accountId, displayName, role } of memberRoles.slice(i, i + BATCH_LIMIT)) {
+        batch.set(db().collection('members').doc(accountId), { accountId, displayName, role }, { merge: true });
+      }
+      await batch.commit();
+    }
+
+    // Aktualizovat roli u uživatelů s app účtem
+    const usersSnap = await db().collection('users').where('role', 'in', ['user', 'freelancer']).get();
+    const accountIdToUid = new Map<string, string>();
+    for (const doc of usersSnap.docs) {
+      const jiraId = doc.data().jiraAccountId as string | null;
+      if (jiraId) accountIdToUid.set(jiraId, doc.id);
+    }
+    if (accountIdToUid.size > 0) {
+      const batch = db().batch();
+      for (const { accountId, role } of memberRoles) {
+        const uid = accountIdToUid.get(accountId);
+        if (uid) { batch.update(db().collection('users').doc(uid), { role }); rolesUpdated++; }
+      }
+      if (rolesUpdated > 0) await batch.commit();
+    }
+    logger.info('AT členové synchronizováni', { total: memberRoles.length, rolesUpdated });
+  } catch (err: any) {
+    logger.warn('Sync členů z AT selhal (nekritická chyba)', { err: String(err) });
+  }
+
   const finishTime = new Date().toISOString();
   const result: Record<string, any> = {
     startedAt: startTime,
@@ -153,6 +189,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     worklogsWritten: totalWritten,
     worklogsSkipped: totalSkipped,
     absencesWritten: absWritten,
+    rolesUpdated,
     range: { from: opts.from, to: opts.to },
     mode: opts.mode,
     ...(atError ? { atError } : {}),

@@ -6,6 +6,7 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
+import { useMembers } from '../hooks/useMembers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
 import { usePreferences } from '../hooks/usePreferences';
@@ -29,6 +30,7 @@ import type { Absence } from '../types/jira';
 export function CompanyReportPage() {
   const { profile } = useAuth();
   const { users } = useUsers();
+  const { members } = useMembers();
   const { preferences, update } = usePreferences();
   const { year: curY, month: curM } = currentMonth();
   const [year, setYear] = useState(curY);
@@ -81,9 +83,9 @@ export function CompanyReportPage() {
     [users]
   );
 
-  const nonFreelancerUsers = useMemo(
-    () => users.filter(u => u.role !== 'freelancer'),
-    [users]
+  const employeeMembers = useMemo(
+    () => members.filter(m => m.role === 'user').map(m => ({ accountId: m.accountId, name: m.displayName })),
+    [members]
   );
 
   const [absences, setAbsences] = useState<Absence[]>([]);
@@ -185,8 +187,9 @@ export function CompanyReportPage() {
   );
 
   const columns: ColumnId[] = useMemo(() => {
-    const stored = (preferences?.columns.companyReport as ColumnId[]) ?? ['date', 'period', 'issue', 'name', 'hours'];
-    const nonLocked = stored.filter(c => !LOCKED_COLUMNS.includes(c));
+    const raw = (preferences?.columns.companyReport as string[]) ?? ['date', 'from', 'to', 'issue', 'name', 'hours'];
+    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
     return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
   const { isLocked, lockNow, unlockNow } = useLock(year, month, accountId);
@@ -229,7 +232,7 @@ export function CompanyReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
-          {isAdmin && <UserSelect users={nonFreelancerUsers} value={selected} onChange={ids => {
+          {isAdmin && <UserSelect jiraUsers={employeeMembers} value={selected} onChange={ids => {
             const next = ids.slice(0, 1); setSelected(next); update({ lastSelectedUser: next[0] ?? null });
           }} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />

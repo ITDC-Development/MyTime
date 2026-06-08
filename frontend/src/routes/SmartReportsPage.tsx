@@ -2,12 +2,14 @@ import { useState, useMemo } from 'react';
 import {
   Box, Typography, Paper, Stack, Button, TextField, MenuItem, Select,
   FormControl, InputLabel, Chip, OutlinedInput, CircularProgress, Alert,
-  Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
+  Table, TableHead, TableBody, TableFooter, TableRow, TableCell, TableContainer,
+  TableSortLabel, FormControlLabel, Checkbox,
 } from '@mui/material';
 import { AutoAwesome } from '@mui/icons-material';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useMembers } from '../hooks/useMembers';
 import { UserSelect } from '../components/common/UserSelect';
 import { api } from '../services/api';
 import { ExportButtons } from '../components/export/ExportButtons';
@@ -15,7 +17,6 @@ import type { RawWorklog, EditedWorklog, ManualWorklog } from '../types/worklog'
 
 type SmartReportRow = { _values: Record<string, number> } & Record<string, string>;
 interface SmartReportResponse { columns: { key: string; label: string }[]; rows: SmartReportRow[]; }
-interface JiraUser { accountId: string; name: string; }
 
 // ─── Konstanty ──────────────────────────────────────────────────────────────
 
@@ -42,10 +43,10 @@ const NONE = '(nevybráno)';
 
 type TimeGrouping = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
-function currentMonthRange() {
+function lastMonthRange() {
   const now = new Date();
-  const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-  const to   = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+  const from = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+  const to   = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
   return { from, to };
 }
 
@@ -57,15 +58,17 @@ export function SmartReportsPage() {
   const ownAccountId = profile?.jiraAccountId ?? null;
 
   // Panel 1 – datum
-  const defaultRange = currentMonthRange();
+  const defaultRange = lastMonthRange();
   const [dateFrom, setDateFrom] = useState(defaultRange.from);
   const [dateTo,   setDateTo]   = useState(defaultRange.to);
   const [loadingData, setLoadingData] = useState(false);
   const [dataLoaded,  setDataLoaded]  = useState(false);
 
+  const { members } = useMembers();
+  const jiraUsers = members.map(m => ({ accountId: m.accountId, name: m.displayName }));
+
   // Načtená data + odvozené seznamy
   const [rawWorklogs, setRawWorklogs] = useState<RawWorklog[]>([]);
-  const [jiraUsers,   setJiraUsers]   = useState<JiraUser[]>([]);
 
   // Panel 2 – konfigurace
   const [selUsers,      setSelUsers]      = useState<string[]>([]);
@@ -80,6 +83,18 @@ export function SmartReportsPage() {
   const [result,  setResult]  = useState<SmartReportResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+
+  // Řazení a filtrování tabulky
+  const [sortKey,    setSortKey]    = useState<string | null>(null);
+  const [sortDir,    setSortDir]    = useState<'asc' | 'desc'>('desc');
+  const [filterText, setFilterText] = useState('');
+  const [minHours,   setMinHours]   = useState<number | ''>('');
+  const [hideZero,   setHideZero]   = useState(false);
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
 
   // ── Načtení dat z Firestore ─────────────────────────────────────────────
 
@@ -154,18 +169,6 @@ export function SmartReportsPage() {
 
       setRawWorklogs(merged);
 
-      if (isAdmin) {
-        const map = new Map<string, string>();
-        for (const w of merged) {
-          if (w.accountId) map.set(w.accountId, w.user || w.accountId);
-        }
-        setJiraUsers(
-          Array.from(map.entries())
-            .map(([accountId, name]) => ({ accountId, name }))
-            .sort((a, b) => a.name.localeCompare(b.name, 'cs'))
-        );
-      }
-
       setSelUsers([]);
       setSelComponents([]);
       setSelParents([]);
@@ -219,6 +222,8 @@ export function SmartReportsPage() {
         }),
       });
       setResult(res);
+      setSortKey(null); setSortDir('desc');
+      setFilterText(''); setMinHours(''); setHideZero(false);
     } catch (e: any) {
       setError(`Chyba AI agenta: ${e.message}`);
     } finally {
@@ -257,6 +262,41 @@ export function SmartReportsPage() {
       .map(([key, label]) => ({ key, label }))
       .sort((a, b) => a.label.localeCompare(b.label, 'cs'));
   }, [byUsers, selComponents]);
+
+  // ── Filtrování + řazení výsledné tabulky ─────────────────────────────────
+
+  const displayedRows = useMemo(() => {
+    if (!result) return [];
+    let rows = [...result.rows];
+
+    if (hideZero) rows = rows.filter(r => Object.values(r._values).reduce((s, v) => s + v, 0) > 0);
+    if (minHours !== '') rows = rows.filter(r => Object.values(r._values).reduce((s, v) => s + v, 0) >= (minHours as number));
+    if (filterText.trim()) {
+      const q = filterText.toLowerCase();
+      rows = rows.filter(r => Object.keys(r).filter(k => k !== '_values').some(k => r[k].toLowerCase().includes(q)));
+    }
+    if (sortKey) {
+      rows.sort((a, b) => {
+        let va: number | string;
+        let vb: number | string;
+        if (sortKey === '_total') {
+          va = Object.values(a._values).reduce((s, v) => s + v, 0);
+          vb = Object.values(b._values).reduce((s, v) => s + v, 0);
+        } else if (a._values[sortKey] !== undefined) {
+          va = a._values[sortKey] ?? 0;
+          vb = b._values[sortKey] ?? 0;
+        } else {
+          va = a[sortKey] ?? '';
+          vb = b[sortKey] ?? '';
+        }
+        if (typeof va === 'number' && typeof vb === 'number') return sortDir === 'asc' ? va - vb : vb - va;
+        return sortDir === 'asc'
+          ? String(va).localeCompare(String(vb), 'cs')
+          : String(vb).localeCompare(String(va), 'cs');
+      });
+    }
+    return rows;
+  }, [result, sortKey, sortDir, filterText, minHours, hideZero]);
 
   // ── Export rows ──────────────────────────────────────────────────────────
 
@@ -453,9 +493,39 @@ export function SmartReportsPage() {
         <Paper sx={{ p: 3, overflow: 'hidden' }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
             <Typography variant="subtitle1" fontWeight={600}>
-              Výsledek · {result.rows.length} řádků
+              Výsledek · {displayedRows.length}{displayedRows.length !== result.rows.length ? ` / ${result.rows.length}` : ''} řádků
             </Typography>
             <ExportButtons rows={exportRows} filename={exportFilename} title={exportTitle} />
+          </Stack>
+
+          {/* Filtrovací panel */}
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ sm: 'center' }} flexWrap="wrap" sx={{ mb: 2 }}>
+            <TextField
+              size="small"
+              label="Hledat"
+              placeholder="Jméno, projekt, issue…"
+              value={filterText}
+              onChange={e => setFilterText(e.target.value)}
+              sx={{ minWidth: 220 }}
+            />
+            <TextField
+              size="small"
+              label="Min. hodin celkem"
+              type="number"
+              value={minHours}
+              onChange={e => setMinHours(e.target.value === '' ? '' : Number(e.target.value))}
+              sx={{ width: 160 }}
+              inputProps={{ min: 0, step: 0.5 }}
+            />
+            <FormControlLabel
+              control={<Checkbox size="small" checked={hideZero} onChange={e => setHideZero(e.target.checked)} />}
+              label="Skrýt nulové řádky"
+            />
+            {(filterText || minHours !== '' || hideZero) && (
+              <Button size="small" variant="text" onClick={() => { setFilterText(''); setMinHours(''); setHideZero(false); }}>
+                Zrušit filtry
+              </Button>
+            )}
           </Stack>
 
           <TableContainer sx={{ maxHeight: 600, overflowX: 'auto', overflowY: 'auto' }}>
@@ -465,23 +535,54 @@ export function SmartReportsPage() {
                   {Object.keys(result.rows[0] ?? {}).filter(k => k !== '_values').map(k => {
                     const dim = DIMENSION_OPTIONS.find(d => d.value === k);
                     return (
-                      <TableCell key={k} sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#2d5f8a', color: '#fff' }}>
-                        {dim?.label ?? k}
+                      <TableCell
+                        key={k}
+                        sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#2d5f8a', color: '#fff', cursor: 'pointer' }}
+                        onClick={() => handleSort(k)}
+                      >
+                        <TableSortLabel
+                          active={sortKey === k}
+                          direction={sortKey === k ? sortDir : 'asc'}
+                          sx={{ color: '#fff !important', '& .MuiTableSortLabel-icon': { color: '#fff !important' } }}
+                        >
+                          {dim?.label ?? k}
+                        </TableSortLabel>
                       </TableCell>
                     );
                   })}
                   {result.columns.map(col => (
-                    <TableCell key={col.key} align="right" sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#2d5f8a', color: '#fff' }}>
-                      {col.label}
+                    <TableCell
+                      key={col.key}
+                      align="right"
+                      sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#2d5f8a', color: '#fff', cursor: 'pointer' }}
+                      onClick={() => handleSort(col.key)}
+                    >
+                      <TableSortLabel
+                        active={sortKey === col.key}
+                        direction={sortKey === col.key ? sortDir : 'asc'}
+                        sx={{ color: '#fff !important', '& .MuiTableSortLabel-icon': { color: '#fff !important' } }}
+                      >
+                        {col.label}
+                      </TableSortLabel>
                     </TableCell>
                   ))}
-                  <TableCell align="right" sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#1a3f5c', color: '#fff' }}>
-                    Celkem
+                  <TableCell
+                    align="right"
+                    sx={{ fontWeight: 700, whiteSpace: 'nowrap', bgcolor: '#1a3f5c', color: '#fff', cursor: 'pointer' }}
+                    onClick={() => handleSort('_total')}
+                  >
+                    <TableSortLabel
+                      active={sortKey === '_total'}
+                      direction={sortKey === '_total' ? sortDir : 'asc'}
+                      sx={{ color: '#fff !important', '& .MuiTableSortLabel-icon': { color: '#fff !important' } }}
+                    >
+                      Celkem
+                    </TableSortLabel>
                   </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {result.rows.map((row, i) => {
+                {displayedRows.map((row, i) => {
                   const dimKeys = Object.keys(row).filter(k => k !== '_values');
                   const total   = Object.values(row._values).reduce((s, v) => s + v, 0);
                   return (
@@ -501,6 +602,26 @@ export function SmartReportsPage() {
                   );
                 })}
               </TableBody>
+              <TableFooter>
+                <TableRow sx={{ bgcolor: '#1a3f5c' }}>
+                  {Object.keys(result.rows[0] ?? {}).filter(k => k !== '_values').map((k, idx) => (
+                    <TableCell key={k} sx={{ fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', borderTop: '2px solid #fff' }}>
+                      {idx === 0 ? 'Celkem' : ''}
+                    </TableCell>
+                  ))}
+                  {result.columns.map(col => {
+                    const colTotal = displayedRows.reduce((s, r) => s + (r._values[col.key] ?? 0), 0);
+                    return (
+                      <TableCell key={col.key} align="right" sx={{ fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', borderTop: '2px solid #fff' }}>
+                        {colTotal > 0 ? `${colTotal.toFixed(2)}h` : '—'}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell align="right" sx={{ fontWeight: 700, color: '#fff', whiteSpace: 'nowrap', borderTop: '2px solid #fff' }}>
+                    {displayedRows.reduce((s, r) => s + Object.values(r._values).reduce((a, v) => a + v, 0), 0).toFixed(2)}h
+                  </TableCell>
+                </TableRow>
+              </TableFooter>
             </Table>
           </TableContainer>
         </Paper>

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Box, Typography, Paper, Stack, Table, TableHead, TableBody, TableRow, TableCell, IconButton, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert, Snackbar } from '@mui/material';
+import { Box, Typography, Paper, Stack, Table, TableContainer, TableHead, TableBody, TableRow, TableCell, IconButton, Chip, Button, Dialog, DialogTitle, DialogContent, DialogActions, Alert, Snackbar } from '@mui/material';
 import { Check, Block, LockOpen, Delete, ArrowUpward, ArrowDownward, PersonAdd, ManageAccounts } from '@mui/icons-material';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useUsers } from '../hooks/useUsers';
@@ -10,9 +10,9 @@ import { AssignJiraDialog } from '../components/admin/AssignJiraDialog';
 import type { UserProfile } from '../types/user';
 import dayjs from 'dayjs';
 
-const ROLE_LABEL: Record<string, string> = { admin: 'Admin', user: 'User', freelancer: 'Freelancer' };
-const ROLE_COLOR: Record<string, string> = { admin: 'secondary', user: 'default', freelancer: 'info' };
-const ROLE_CYCLE: Record<string, string> = { admin: 'user', user: 'freelancer', freelancer: 'admin' };
+const ROLE_LABEL: Record<string, string> = { admin: 'Admin', user: 'User', freelancer: 'User' };
+const ROLE_COLOR: Record<string, string> = { admin: 'secondary', user: 'default', freelancer: 'default' };
+const ROLE_CYCLE: Record<string, string> = { admin: 'user', user: 'admin', freelancer: 'admin' };
 
 export function UsersAdminPage() {
   const { profile } = useAuth();
@@ -77,46 +77,42 @@ export function UsersAdminPage() {
           </IconButton>
         </Stack>
       </TableCell>
-      <TableCell align="right">
-        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+      <TableCell>
+        <Stack direction="row" spacing={0.5}>
           {sectionType === 'pending' && (
             <>
-              <Button size="small" startIcon={<Check />} variant="contained" onClick={() => updateUser(u.uid, { status: 'active' })}>Schválit</Button>
-              <Button size="small" color="error" startIcon={<Block />} onClick={() => updateUser(u.uid, { status: 'blocked' })}>Zamítnout</Button>
+              <Button size="small" startIcon={<Check />} variant="contained"
+                onClick={() => askConfirm(u, 'schválit', async () => updateUser(u.uid, { status: 'active' }))}>
+                Schválit
+              </Button>
+              <Button size="small" color="error" startIcon={<Block />}
+                onClick={() => askConfirm(u, 'zamítnout', async () => updateUser(u.uid, { status: 'blocked' }))}>
+                Zamítnout
+              </Button>
             </>
           )}
           {sectionType === 'active' && (
             <>
               <IconButton size="small" title={`Změnit roli (aktuálně: ${ROLE_LABEL[u.role] ?? u.role})`} onClick={() => {
                 const newRole = ROLE_CYCLE[u.role] ?? 'user';
-                const isLast = lastAdminWarning(u) && newRole !== 'admin';
-                const run = async () => updateUser(u.uid, { role: newRole });
-                if (isLast || u.uid === profile?.uid) askConfirm(u, `změnit roli na ${ROLE_LABEL[newRole]}`, run);
-                else run();
+                askConfirm(u, `změnit roli na ${ROLE_LABEL[newRole] ?? newRole}`, async () => updateUser(u.uid, { role: newRole }));
               }}>
                 {u.role === 'admin' ? <ArrowDownward fontSize="small" /> : <ArrowUpward fontSize="small" />}
               </IconButton>
-              <IconButton size="small" title="Zablokovat" color="warning" onClick={() => {
-                const isLast = lastAdminWarning(u);
-                const run = async () => updateUser(u.uid, { status: 'blocked' });
-                if (isLast || u.uid === profile?.uid) askConfirm(u, 'zablokovat', run);
-                else run();
-              }}>
+              <IconButton size="small" title="Zablokovat" color="warning"
+                onClick={() => askConfirm(u, 'zablokovat', async () => updateUser(u.uid, { status: 'blocked' }))}>
                 <Block fontSize="small" />
               </IconButton>
             </>
           )}
           {sectionType === 'blocked' && (
-            <IconButton size="small" title="Odblokovat" color="success" onClick={() => updateUser(u.uid, { status: 'active' })}>
+            <IconButton size="small" title="Odblokovat" color="success"
+              onClick={() => askConfirm(u, 'odblokovat', async () => updateUser(u.uid, { status: 'active' }))}>
               <LockOpen fontSize="small" />
             </IconButton>
           )}
-          <IconButton size="small" title="Smazat" color="error" onClick={() => {
-            const isLast = lastAdminWarning(u);
-            const run = async () => deleteUser(u.uid);
-            if (isLast || u.uid === profile?.uid) askConfirm(u, 'smazat účet', run);
-            else run();
-          }}>
+          <IconButton size="small" title="Smazat" color="error"
+            onClick={() => askConfirm(u, 'odstranit účet', async () => deleteUser(u.uid))}>
             <Delete fontSize="small" />
           </IconButton>
         </Stack>
@@ -139,34 +135,40 @@ export function UsersAdminPage() {
       {pending.length > 0 && (
         <Paper sx={{ p: 3, mb: 2 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>Čekající na schválení ({pending.length})</Typography>
-          <Table size="small">
-            <TableHead><TableRow>
-              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell align="right">Akce</TableCell>
-            </TableRow></TableHead>
-            <TableBody>{pending.map(u => renderRow(u, 'pending'))}</TableBody>
-          </Table>
+          <TableContainer sx={{ width: '100%' }}>
+            <Table size="small" sx={{ width: '100%' }}>
+              <TableHead><TableRow>
+                <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell>Akce</TableCell>
+              </TableRow></TableHead>
+              <TableBody>{pending.map(u => renderRow(u, 'pending'))}</TableBody>
+            </Table>
+          </TableContainer>
         </Paper>
       )}
 
       <Paper sx={{ p: 3, mb: 2 }}>
         <Typography variant="h6" sx={{ mb: 2 }}>Aktivní uživatelé ({active.length})</Typography>
-        <Table size="small">
-          <TableHead><TableRow>
-            <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell align="right">Akce</TableCell>
-          </TableRow></TableHead>
-          <TableBody>{active.map(u => renderRow(u, 'active'))}</TableBody>
-        </Table>
+        <TableContainer sx={{ width: '100%' }}>
+          <Table size="small" sx={{ width: '100%' }}>
+            <TableHead><TableRow>
+              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell>Akce</TableCell>
+            </TableRow></TableHead>
+            <TableBody>{active.map(u => renderRow(u, 'active'))}</TableBody>
+          </Table>
+        </TableContainer>
       </Paper>
 
       {blocked.length > 0 && (
         <Paper sx={{ p: 3 }}>
           <Typography variant="h6" sx={{ mb: 2 }}>Zablokovaní ({blocked.length})</Typography>
-          <Table size="small">
-            <TableHead><TableRow>
-              <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell align="right">Akce</TableCell>
-            </TableRow></TableHead>
-            <TableBody>{blocked.map(u => renderRow(u, 'blocked'))}</TableBody>
-          </Table>
+          <TableContainer sx={{ width: '100%' }}>
+            <Table size="small" sx={{ width: '100%' }}>
+              <TableHead><TableRow>
+                <TableCell>Email</TableCell><TableCell>Jméno</TableCell><TableCell>Registrace</TableCell><TableCell>Role</TableCell><TableCell>Jira účet</TableCell><TableCell>Akce</TableCell>
+              </TableRow></TableHead>
+              <TableBody>{blocked.map(u => renderRow(u, 'blocked'))}</TableBody>
+            </Table>
+          </TableContainer>
         </Paper>
       )}
 
@@ -185,7 +187,7 @@ export function UsersAdminPage() {
             <>
               {confirm.user.uid === profile?.uid && (
                 <Alert severity="warning" sx={{ mb: 2 }}>
-                  Pokoušíš se {confirm.action} svůj vlastní účet.
+                  Chystáte se provést tuto akci na svém vlastním účtu.
                 </Alert>
               )}
               {lastAdminWarning(confirm.user) && (
@@ -194,7 +196,7 @@ export function UsersAdminPage() {
                 </Alert>
               )}
               <Typography>
-                Opravdu chceš {confirm.action} účet <strong>{confirm.user.email}</strong>?
+                Chystáte se <strong>{confirm.action}</strong> uživatele <strong>{confirm.user.displayName}</strong>.
               </Typography>
             </>
           )}

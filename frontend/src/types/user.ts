@@ -2,6 +2,7 @@ export interface Member {
   accountId: string;
   displayName: string;
   role: 'user' | 'freelancer';
+  country?: 'CZ' | 'SK';
 }
 
 export interface UserProfile {

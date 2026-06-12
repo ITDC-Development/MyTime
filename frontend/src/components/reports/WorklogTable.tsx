@@ -40,7 +40,7 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
             : row.isAbsence ? 'rgba(33,150,243,0.13)'
             : row.isPause ? BRAND.cream
             : (showOvertime && row.isOvertime) ? 'rgba(186,117,23,0.10)'
-            : row.isEdited ? 'rgba(44,140,153,0.06)' : 'inherit';
+            : row.isEdited ? 'rgba(139,170,69,0.06)' : 'inherit';
           return (
             <TableRow key={`${row.worklogId}-${idx}`} sx={{ backgroundColor: bg }}>
               {columns.map(c => <TableCell key={c}>{cellValue(row, c, showOvertime)}</TableCell>)}

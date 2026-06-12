@@ -1,6 +1,6 @@
 import { db } from './firestoreClient';
 import { fetchJiraWorklogs, splitIntoMonths } from './jiraClient';
-import { fetchAbsences, fetchMemberRoles } from './activityTimelineClient';
+import { fetchAbsences, fetchMemberRoles, type MemberRole } from './activityTimelineClient';
 import { isLocked } from './lockService';
 import { logger } from '../utils/logger';
 import type { RawWorklog, Absence } from '../types/worklog';
@@ -99,11 +99,20 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     logger.info('Chunk zapsán', { chunk, written });
   }
 
+  // Fetch member roles first — needed to filter HOLIDAY absences by correct country
+  let prefetchedMemberRoles: MemberRole[] = [];
+  try {
+    const year = new Date().getUTCFullYear();
+    prefetchedMemberRoles = await fetchMemberRoles(`${year}-01-01`, `${year}-12-31`);
+  } catch (err: any) {
+    logger.warn('Pre-fetch member roles selhal — absence se mohou zapsat bez filtrování HOLIDAY', { err: String(err) });
+  }
+
   // Absences
   let absWritten = 0;
   let atError: string | null = null;
   try {
-    const absences = await fetchAbsences(opts.from, opts.to);
+    const absences = await fetchAbsences(opts.from, opts.to, prefetchedMemberRoles);
     const absDocs: { ref: FirebaseFirestore.DocumentReference; data: Absence }[] = [];
 
     for (const a of absences) {
@@ -135,10 +144,27 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
       }
     }
 
-    // Diagnostika — unikátní accountId uložených absencí
-    const uniqueAccounts = [...new Set(absDocs.map(d => `${d.data.user} → ${d.data.accountId} (${d.data.type})`))];
-    logger.info('Absence accountIds ukládané do Firestore', { uniqueAccounts });
-    absWritten = await commitInChunks(absDocs);
+    // V incremental módu přeskočit již existující absence (stejně jako worklogy)
+    let docsToWrite = absDocs;
+    if (opts.mode === 'incremental' && absDocs.length > 0) {
+      const GETALL_LIMIT = 500;
+      const existingIds = new Set<string>();
+      for (let i = 0; i < absDocs.length; i += GETALL_LIMIT) {
+        const refs = absDocs.slice(i, i + GETALL_LIMIT).map(d => d.ref);
+        const snaps = await db().getAll(...refs);
+        for (const snap of snaps) {
+          if (snap.exists) existingIds.add(snap.id);
+        }
+      }
+      docsToWrite = absDocs.filter(d => !existingIds.has(d.ref.id));
+      logger.info('Absence incremental — přeskočeny existující', {
+        total: absDocs.length,
+        skipped: existingIds.size,
+        toWrite: docsToWrite.length,
+      });
+    }
+
+    absWritten = await commitInChunks(docsToWrite);
   } catch (err: any) {
     atError = err?.response
       ? `HTTP ${err.response.status}: ${JSON.stringify(err.response.data).slice(0, 300)}`
@@ -149,15 +175,17 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
   // Sync členů a rolí z AT (nekritická — chyba neblokuje výsledek syncu)
   let rolesUpdated = 0;
   try {
-    // Použijeme celý aktuální rok aby se načetli i členové bez aktivit v sync-periodě
-    const year = new Date().getUTCFullYear();
-    const memberRoles = await fetchMemberRoles(`${year}-01-01`, `${year}-12-31`);
+    const memberRoles = prefetchedMemberRoles.length > 0
+      ? prefetchedMemberRoles
+      : await fetchMemberRoles(`${new Date().getUTCFullYear()}-01-01`, `${new Date().getUTCFullYear()}-12-31`);
 
     // Uložit všechny AT členy do kolekce members (accountId jako ID dokumentu)
     for (let i = 0; i < memberRoles.length; i += BATCH_LIMIT) {
       const batch = db().batch();
-      for (const { accountId, displayName, role } of memberRoles.slice(i, i + BATCH_LIMIT)) {
-        batch.set(db().collection('members').doc(accountId), { accountId, displayName, role }, { merge: true });
+      for (const { accountId, displayName, role, country } of memberRoles.slice(i, i + BATCH_LIMIT)) {
+        const data: Record<string, any> = { accountId, displayName, role };
+        if (country) data.country = country;
+        batch.set(db().collection('members').doc(accountId), data, { merge: true });
       }
       await batch.commit();
     }

@@ -21,6 +21,8 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
     return (
       <Autocomplete
         multiple={multiple}
+        limitTags={2}
+        getLimitTagsText={(more) => `+${more}`}
         size="small"
         options={jiraUsers}
         getOptionLabel={(o) => o.name}
@@ -30,7 +32,7 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
           const arr = Array.isArray(v) ? v : v ? [v] : [];
           onChange(arr.map(u => u.accountId));
         }}
-        sx={{ minWidth: 220 }}
+        sx={{ minWidth: 220, maxWidth: 360 }}
         renderInput={(params) => <TextField {...params} label={label} />}
         renderTags={(tagValue, getTagProps) =>
           tagValue.map((option, index) => (
@@ -48,6 +50,8 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
   return (
     <Autocomplete
       multiple={multiple}
+      limitTags={2}
+      getLimitTagsText={(more) => `+${more}`}
       size="small"
       options={opts}
       getOptionLabel={label_of}
@@ -57,7 +61,7 @@ export function UserSelect({ users, jiraUsers, value, onChange, multiple = false
         const arr = Array.isArray(v) ? v : v ? [v] : [];
         onChange(arr.map(u => u.jiraAccountId!).filter(Boolean));
       }}
-      sx={{ minWidth: 220 }}
+      sx={{ minWidth: 220, maxWidth: 360 }}
       renderInput={(params) => <TextField {...params} label={label} />}
       renderTags={(tagValue, getTagProps) =>
         tagValue.map((option, index) => (

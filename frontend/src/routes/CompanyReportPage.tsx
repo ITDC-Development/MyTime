@@ -1,14 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Alert, Button } from '@mui/material';
+import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Alert, Button, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import { PictureAsPdf } from '@mui/icons-material';
-import { exportPdf, type PdfSummaryItem } from '../services/exporters/pdfExporter';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { exportPdf, exportPdfBulk, type PdfSummaryItem, type PdfSection } from '../services/exporters/pdfExporter';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
 import { useMembers } from '../hooks/useMembers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
+import { usePublicHolidays } from '../hooks/usePublicHolidays';
 import { usePreferences } from '../hooks/usePreferences';
 import { currentMonth, monthLabel, monthRange } from '../utils/dateUtils';
 import { formatHours } from '../utils/formatters';
@@ -40,16 +41,30 @@ export function CompanyReportPage() {
   const isFreelancer = profile?.role === 'freelancer';
   const ownAccount = profile?.jiraAccountId ?? null;
   const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
+  const [countryFilter, setCountryFilter] = useState<'all' | 'CZ' | 'SK'>('all');
 
   useEffect(() => {
     if (!isAdmin && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
   }, [isAdmin, ownAccount]);
 
+  useEffect(() => {
+    if (countryFilter === 'all' || selected.length === 0) return;
+    const member = members.find(m => m.accountId === selected[0]);
+    if (member?.country !== countryFilter) setSelected([]);
+  }, [countryFilter]);
+
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
   const accountId = selected[0] ?? null;
 
+  const memberCountry = useMemo(
+    () => members.find(m => m.accountId === accountId)?.country ?? null,
+    [members, accountId]
+  );
+  const publicHolidays = usePublicHolidays(year, memberCountry);
+
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
+  const [isBulkExporting, setIsBulkExporting] = useState(false);
 
   const handleDeleteEdit = async (worklog: LinearWorklog) => {
     if (!profile) return;
@@ -76,6 +91,108 @@ export function CompanyReportPage() {
       after: {},
     });
   };
+  const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+
+  const handleBulkExport = async () => {
+    setIsBulkExporting(true);
+    try {
+      const { from, to } = monthRange(year, month);
+
+      const employeesToExport = members
+        .filter(m => m.role === 'user' && (countryFilter === 'all' || m.country === countryFilter))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, 'cs'));
+      if (employeesToExport.length === 0) return;
+
+      const exportAccountIds = new Set(employeesToExport.map(m => m.accountId));
+
+      // Stáhni svátky z nager.at pro CZ a SK najednou jako fallback
+      const fetchNagerHolidays = async (country: 'CZ' | 'SK') => {
+        try {
+          const r = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`);
+          if (!r.ok) return new Set<string>();
+          const data: { date: string }[] = await r.json();
+          return new Set(data.map(h => h.date));
+        } catch { return new Set<string>(); }
+      };
+      const [czHolidays, skHolidays] = await Promise.all([fetchNagerHolidays('CZ'), fetchNagerHolidays('SK')]);
+
+      // Načti absence pro všechny zaměstnance najednou (Firestore 'in' max 30)
+      const allAbsences: import('../types/jira').Absence[] = [];
+      const ids = employeesToExport.map(m => m.accountId);
+      for (let i = 0; i < ids.length; i += 30) {
+        const snap = await getDocs(query(
+          collection(firestore, 'absences'),
+          where('accountId', 'in', ids.slice(i, i + 30)),
+          where('date', '>=', from),
+          where('date', '<=', to),
+        ));
+        allAbsences.push(...snap.docs.map(d => d.data() as import('../types/jira').Absence));
+      }
+
+      // Seskup linear záznamy podle zaměstnance
+      const linearByAccount = new Map<string, typeof linear>();
+      for (const row of linear) {
+        if (!exportAccountIds.has(row.accountId) || row.isPause) continue;
+        if (!linearByAccount.has(row.accountId)) linearByAccount.set(row.accountId, []);
+        linearByAccount.get(row.accountId)!.push(row);
+      }
+
+      const sections: PdfSection[] = [];
+      for (const emp of employeesToExport) {
+        const empRows = linearByAccount.get(emp.accountId) ?? [];
+        if (empRows.length === 0) continue;
+
+        const empAbsences = allAbsences.filter(a => a.accountId === emp.accountId);
+        const atHolidays = new Set(empAbsences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+        const fallback = emp.country === 'CZ' ? czHolidays : emp.country === 'SK' ? skHolidays : new Set<string>();
+        const holidayDates = atHolidays.size > 0 ? atHolidays : fallback;
+
+        let workingDays = 0;
+        const cur = new Date(from + 'T00:00:00Z');
+        const end = new Date(to + 'T00:00:00Z');
+        while (cur <= end) {
+          const dow = cur.getUTCDay();
+          const ds = cur.toISOString().slice(0, 10);
+          if (dow !== 0 && dow !== 6 && !holidayDates.has(ds)) workingDays++;
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+        const expectedH = workingDays * 8;
+        const vacH = empAbsences.filter(a => a.type === 'VACATION' || a.type === 'DAY_OFF').reduce((s, a) => s + a.hours, 0);
+        const sickH = empAbsences.filter(a => a.type === 'SICK_LEAVE').reduce((s, a) => s + a.hours, 0);
+        const workedH = totalWorkedHours(empRows);
+        const overtimeH = Math.max(0, workedH + vacH - expectedH);
+
+        sections.push({
+          name: emp.displayName,
+          summary: [
+            { label: 'Odpracováno / Fond', value: `${formatHours(workedH)} h / ${formatHours(expectedH)} h` },
+            { label: 'Dovolená', value: `${formatHours(vacH)} h` },
+            { label: 'Nemoc', value: `${formatHours(sickH)} h` },
+            { label: 'Přesčas', value: `${formatHours(overtimeH)} h` },
+          ],
+          rows: empRows.map(r => ({
+            'Datum': r.date,
+            'Od': fmt(r.startMinutes),
+            'Do': fmt(r.endMinutes),
+            'Hodiny': r.hours.toFixed(2),
+            'Issue': r.issueKey,
+            'Popis': r.summary,
+          })),
+        });
+      }
+
+      const label = countryFilter === 'all' ? 'vsichni' : countryFilter.toLowerCase();
+      const titleLabel = countryFilter === 'all' ? 'Všichni zaměstnanci' : `Zaměstnanci ${countryFilter}`;
+      await exportPdfBulk(
+        sections,
+        `dochazka-${label}-${year}-${String(month).padStart(2, '0')}`,
+        `Docházka – ${titleLabel} – ${monthLabel(year, month)}`,
+      );
+    } finally {
+      setIsBulkExporting(false);
+    }
+  };
+
   const { linear } = useWorklogs({ accountIds, year, month });
 
   const freelancerAccountIds = useMemo(
@@ -84,8 +201,10 @@ export function CompanyReportPage() {
   );
 
   const employeeMembers = useMemo(
-    () => members.filter(m => m.role === 'user').map(m => ({ accountId: m.accountId, name: m.displayName })),
-    [members]
+    () => members
+      .filter(m => m.role === 'user' && (countryFilter === 'all' || m.country === countryFilter))
+      .map(m => ({ accountId: m.accountId, name: m.displayName })),
+    [members, countryFilter]
   );
 
   const [absences, setAbsences] = useState<Absence[]>([]);
@@ -108,7 +227,8 @@ export function CompanyReportPage() {
 
   const expectedHours = useMemo(() => {
     const { from, to } = monthRange(year, month);
-    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const atHolidays = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const holidayDates = atHolidays.size > 0 ? atHolidays : publicHolidays;
     let workingDays = 0;
     const cur = new Date(from + 'T00:00:00Z');
     const end = new Date(to + 'T00:00:00Z');
@@ -119,7 +239,7 @@ export function CompanyReportPage() {
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return workingDays * 8;
-  }, [year, month, absences]);
+  }, [year, month, absences, publicHolidays]);
 
   const stats = useMemo(() => {
     const ot = overtimeStats(linear);
@@ -201,7 +321,6 @@ export function CompanyReportPage() {
       ?? accountId;
   }, [accountId, users, linear]);
 
-  const fmt = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
   const pdfRows = linear
     .filter(r => !r.isPause)
     .map(r => ({
@@ -232,6 +351,18 @@ export function CompanyReportPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
+          {isAdmin && (
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={countryFilter}
+              onChange={(_, v) => { if (v) setCountryFilter(v); }}
+            >
+              <ToggleButton value="all">Vše</ToggleButton>
+              <ToggleButton value="CZ">CZ</ToggleButton>
+              <ToggleButton value="SK">SK</ToggleButton>
+            </ToggleButtonGroup>
+          )}
           {isAdmin && <UserSelect jiraUsers={employeeMembers} value={selected} onChange={ids => {
             const next = ids.slice(0, 1); setSelected(next); update({ lastSelectedUser: next[0] ?? null });
           }} />}
@@ -256,8 +387,8 @@ export function CompanyReportPage() {
                 <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
               </Grid>
             )}
-            {accountId && (
-              <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
+            <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mb: 1 }}>
+              {accountId && (
                 <Button
                   size="small"
                   variant="outlined"
@@ -266,8 +397,19 @@ export function CompanyReportPage() {
                 >
                   Stáhnout PDF
                 </Button>
-              </Stack>
-            )}
+              )}
+              {isAdmin && !accountId && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<PictureAsPdf />}
+                  disabled={isBulkExporting}
+                  onClick={handleBulkExport}
+                >
+                  {isBulkExporting ? 'Generuji PDF…' : `Exportovat ${countryFilter === 'all' ? 'vše' : countryFilter} PDF`}
+                </Button>
+              )}
+            </Stack>
             <WorklogTable
               rows={combinedRows}
               columns={columns}
@@ -303,7 +445,7 @@ export function CompanyReportPage() {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Grid item xs={12} sm={6} md={4}>
-      <Card sx={{ background: '#FAF7F0' }}>
+      <Card sx={{ background: '#f8f9f9' }}>
         <CardContent>
           <Typography variant="caption" color="text.secondary">{label}</Typography>
           <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500 }}>{value}</Typography>

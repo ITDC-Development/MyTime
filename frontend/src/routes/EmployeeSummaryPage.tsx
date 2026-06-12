@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Table, TableHead, TableBody, TableRow, TableCell, Chip, Alert } from '@mui/material';
+import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Table, TableHead, TableBody, TableRow, TableCell, Chip, Alert, ToggleButtonGroup, ToggleButton } from '@mui/material';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useMembers } from '../hooks/useMembers';
+import { usePublicHolidays } from '../hooks/usePublicHolidays';
 import { UserSelect } from '../components/common/UserSelect';
 import { MonthSelect } from '../components/common/MonthSelect';
 import { currentMonth, monthRange, formatDateFull } from '../utils/dateUtils';
@@ -36,18 +37,33 @@ export function EmployeeSummaryPage() {
   const { members } = useMembers();
   const ownAccount = profile?.jiraAccountId ?? null;
   const [selected, setSelected] = useState<string[]>(!isAdmin && ownAccount ? [ownAccount] : []);
+  const [countryFilter, setCountryFilter] = useState<'all' | 'CZ' | 'SK'>('all');
 
   useEffect(() => {
     if (!isAdmin && ownAccount && !selected.includes(ownAccount)) setSelected([ownAccount]);
   }, [isAdmin, ownAccount]);
 
+  useEffect(() => {
+    if (countryFilter === 'all' || selected.length === 0) return;
+    const member = members.find(m => m.accountId === selected[0]);
+    if (member?.country !== countryFilter) setSelected([]);
+  }, [countryFilter]);
+
   const accountId = selected[0] ?? null;
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
   const { linear } = useWorklogs({ accountIds, year, month });
 
+  const memberCountry = useMemo(
+    () => members.find(m => m.accountId === accountId)?.country ?? null,
+    [members, accountId]
+  );
+  const publicHolidays = usePublicHolidays(year, memberCountry);
+
   const employeeMembers = useMemo(
-    () => members.filter(m => m.role === 'user').map(m => ({ accountId: m.accountId, name: m.displayName })),
-    [members]
+    () => members
+      .filter(m => m.role === 'user' && (countryFilter === 'all' || m.country === countryFilter))
+      .map(m => ({ accountId: m.accountId, name: m.displayName })),
+    [members, countryFilter]
   );
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [absenceError, setAbsenceError] = useState<string | null>(null);
@@ -72,7 +88,8 @@ export function EmployeeSummaryPage() {
 
   const expectedHours = useMemo(() => {
     const { from, to } = monthRange(year, month);
-    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const atHolidays = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const holidayDates = atHolidays.size > 0 ? atHolidays : publicHolidays;
     let workingDays = 0;
     const cur = new Date(from + 'T00:00:00Z');
     const end = new Date(to + 'T00:00:00Z');
@@ -83,7 +100,7 @@ export function EmployeeSummaryPage() {
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return workingDays * 8;
-  }, [year, month, absences]);
+  }, [year, month, absences, publicHolidays]);
 
   const stats = useMemo(() => {
     const ot = overtimeStats(linear);
@@ -109,6 +126,18 @@ export function EmployeeSummaryPage() {
 
       <Paper sx={{ p: 3 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 3 }} alignItems={{ md: 'center' }}>
+          {isAdmin && (
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={countryFilter}
+              onChange={(_, v) => { if (v) setCountryFilter(v); }}
+            >
+              <ToggleButton value="all">Vše</ToggleButton>
+              <ToggleButton value="CZ">CZ</ToggleButton>
+              <ToggleButton value="SK">SK</ToggleButton>
+            </ToggleButtonGroup>
+          )}
           {isAdmin && <UserSelect jiraUsers={employeeMembers} value={selected} onChange={ids => setSelected(ids.slice(0, 1))} />}
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
         </Stack>
@@ -170,7 +199,7 @@ export function EmployeeSummaryPage() {
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <Grid item xs={12} sm={6} md={4}>
-      <Card sx={{ background: '#FAF7F0' }}>
+      <Card sx={{ background: '#f8f9f9' }}>
         <CardContent>
           <Typography variant="caption" color="text.secondary">{label}</Typography>
           <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500 }}>{value}</Typography>

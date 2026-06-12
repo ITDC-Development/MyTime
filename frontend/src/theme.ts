@@ -2,12 +2,15 @@ import { createTheme } from '@mui/material';
 import { csCZ } from '@mui/material/locale';
 
 export const BRAND = {
-  navy: '#1F2A44',
-  navyLight: '#2D3D5F',
-  teal: '#2C8C99',
-  cream: '#FAF7F0',
-  border: '#E5E0D5',
+  navy: '#002449',
+  navyLight: '#1a3a63',
+  teal: '#8BAA45',
+  cream: '#f8f9f9',
+  border: '#e9e9e9',
 };
+
+const HEADING_FONT = '"Raleway", "Open Sans", system-ui, sans-serif';
+const BODY_FONT = '"Open Sans", "Segoe UI", system-ui, sans-serif';
 
 export const theme = createTheme(
   {
@@ -16,18 +19,21 @@ export const theme = createTheme(
       primary: { main: BRAND.navy, contrastText: '#FFFFFF' },
       secondary: { main: BRAND.teal },
       background: { default: BRAND.cream, paper: '#FFFFFF' },
-      text: { primary: BRAND.navy, secondary: '#5F5E5A' },
+      text: { primary: '#333333', secondary: '#777777' },
       divider: BRAND.border,
       success: { main: '#2D6A3F', light: '#E5F0E8' },
       warning: { main: '#8B5A0F', light: '#F7EBD5' },
       error: { main: '#8B2D26', light: '#F5E0DD' },
     },
     typography: {
-      fontFamily: '"Segoe UI", system-ui, -apple-system, sans-serif',
-      h4: { fontWeight: 500 },
-      h5: { fontWeight: 500 },
-      h6: { fontWeight: 500 },
-      button: { textTransform: 'none', fontWeight: 500 },
+      fontFamily: BODY_FONT,
+      h1: { fontFamily: HEADING_FONT, fontWeight: 700 },
+      h2: { fontFamily: HEADING_FONT, fontWeight: 700 },
+      h3: { fontFamily: HEADING_FONT, fontWeight: 600 },
+      h4: { fontFamily: HEADING_FONT, fontWeight: 600 },
+      h5: { fontFamily: HEADING_FONT, fontWeight: 600 },
+      h6: { fontFamily: HEADING_FONT, fontWeight: 600 },
+      button: { textTransform: 'none', fontWeight: 600, fontFamily: BODY_FONT },
     },
     shape: { borderRadius: 8 },
     components: {
@@ -39,7 +45,7 @@ export const theme = createTheme(
       MuiPaper: { styleOverrides: { rounded: { borderRadius: 12 } } },
       MuiTableCell: {
         styleOverrides: {
-          head: { backgroundColor: BRAND.cream, color: '#5F5E5A', fontWeight: 500, fontSize: '0.78rem' },
+          head: { backgroundColor: BRAND.cream, color: '#555555', fontWeight: 600, fontSize: '0.78rem' },
           body: { fontSize: '0.85rem' },
         },
       },

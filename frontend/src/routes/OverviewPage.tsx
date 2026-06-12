@@ -16,7 +16,7 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { ExportButtons } from '../components/export/ExportButtons';
 import { ExportPresetManager } from '../components/export/ExportPresetManager';
 import { setLocks } from '../services/firestore/locks';
-import { ColumnId, LOCKED_COLUMNS } from '../types/export';
+import { ColumnId } from '../types/export';
 import type { ExportPreset } from '../types/user';
 import dayjs from 'dayjs';
 
@@ -37,9 +37,7 @@ export function OverviewPage() {
   const showPauses = preferences?.showPauses ?? true;
   const stored = useMemo(() => {
     const raw = (preferences?.columns.overview as string[]) ?? ['user', 'date', 'from', 'to', 'issue', 'name', 'hours'];
-    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
-    const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
-    return [...LOCKED_COLUMNS, ...nonLocked];
+    return raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
   }, [preferences]);
 
   const columns = useMemo(() => {
@@ -47,7 +45,13 @@ export function OverviewPage() {
     return stored;
   }, [selected, stored]);
 
-  const filtered = useMemo(() => filterPauses(linear, showPauses), [linear, showPauses]);
+  const filtered = useMemo(() => {
+    const rows = filterPauses(linear, showPauses);
+    return [...rows].sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return a.startMinutes - b.startMinutes;
+    });
+  }, [linear, showPauses]);
 
   const rowsForExport = useMemo(() =>
     filtered.map(r => {
@@ -120,8 +124,11 @@ export function OverviewPage() {
       </Typography>
 
       <Paper sx={{ p: 3 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'center' }} flexWrap="wrap">
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} sx={{ mb: 2 }} alignItems={{ md: 'flex-end' }} flexWrap="wrap">
           <UserSelect jiraUsers={members.map(m => ({ accountId: m.accountId, name: m.displayName }))} value={selected} onChange={setSelected} multiple label="Uživatelé" />
+          <Button size="small" variant="outlined" sx={{ mb: '2px' }} onClick={() => setSelected(members.map(m => m.accountId))}>
+            Vybrat vše
+          </Button>
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
         </Stack>
@@ -129,7 +136,6 @@ export function OverviewPage() {
         <ColumnPicker
           selected={stored}
           onChange={cols => update({ columns: { ...preferences!.columns, overview: cols } })}
-          locked={LOCKED_COLUMNS}
         />
         <ExportPresetManager
           currentColumns={stored}

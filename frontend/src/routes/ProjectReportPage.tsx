@@ -8,6 +8,7 @@ import { useUsers } from '../hooks/useUsers';
 import { useMembers } from '../hooks/useMembers';
 import { useWorklogs } from '../hooks/useWorklogs';
 import { useLock } from '../hooks/useLock';
+import { usePublicHolidays } from '../hooks/usePublicHolidays';
 import { usePreferences } from '../hooks/usePreferences';
 import { currentMonth, monthLabel, monthRange } from '../utils/dateUtils';
 import { formatHours } from '../utils/formatters';
@@ -82,6 +83,11 @@ export function ProjectReportPage() {
   const accountId = selected[0] ?? null;
   const { linear } = useWorklogs({ accountIds, year, month });
 
+  const memberCountry = useMemo(
+    () => members.find(m => m.accountId === accountId)?.country ?? null,
+    [members, accountId]
+  );
+  const publicHolidays = usePublicHolidays(year, memberCountry);
 
   // Absence pro výpočet fondu (jen pro freelancera)
   const [absences, setAbsences] = useState<Absence[]>([]);
@@ -100,7 +106,8 @@ export function ProjectReportPage() {
   const expectedHours = useMemo(() => {
     if (!isFreelancer) return 0;
     const { from, to } = monthRange(year, month);
-    const holidayDates = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const atHolidays = new Set(absences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+    const holidayDates = atHolidays.size > 0 ? atHolidays : publicHolidays;
     let workingDays = 0;
     const cur = new Date(from + 'T00:00:00Z');
     const end = new Date(to + 'T00:00:00Z');
@@ -111,7 +118,7 @@ export function ProjectReportPage() {
       cur.setUTCDate(cur.getUTCDate() + 1);
     }
     return workingDays * 8;
-  }, [isFreelancer, year, month, absences]);
+  }, [isFreelancer, year, month, absences, publicHolidays]);
 
   const workedHours = useMemo(() => totalWorkedHours(linear), [linear]);
 
@@ -174,7 +181,7 @@ export function ProjectReportPage() {
             {isFreelancer && accountId && (
               <Grid container spacing={2} sx={{ mb: 3 }}>
                 <Grid item xs={12} sm={6} md={4}>
-                  <Card sx={{ background: '#FAF7F0' }}>
+                  <Card sx={{ background: '#f8f9f9' }}>
                     <CardContent>
                       <Typography variant="caption" color="text.secondary">Odpracováno / Fond</Typography>
                       <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 500 }}>

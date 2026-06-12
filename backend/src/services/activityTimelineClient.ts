@@ -86,6 +86,7 @@ export interface MemberRole {
   accountId: string;
   displayName: string;
   role: 'user' | 'freelancer';
+  country?: 'CZ' | 'SK';
 }
 
 function roleFromPosition(positionNameLong: string | undefined): 'user' | 'freelancer' {
@@ -94,18 +95,37 @@ function roleFromPosition(positionNameLong: string | undefined): 'user' | 'freel
   return 'user';
 }
 
+function buildTeamCountryMap(): Map<string, 'CZ' | 'SK'> {
+  const map = new Map<string, 'CZ' | 'SK'>();
+  for (const id of (process.env.ACTIVITY_TIMELINE_CZ_TEAM_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+    map.set(id, 'CZ');
+  }
+  for (const id of (process.env.ACTIVITY_TIMELINE_SK_TEAM_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean)) {
+    map.set(id, 'SK');
+  }
+  return map;
+}
+
+function getAllTeamIds(): string[] {
+  const generic = (process.env.ACTIVITY_TIMELINE_TEAM_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const cz = (process.env.ACTIVITY_TIMELINE_CZ_TEAM_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  const sk = (process.env.ACTIVITY_TIMELINE_SK_TEAM_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  // CZ/SK musí být první — seen set by jinak označil členy bez country z generického týmu
+  return [...new Set([...cz, ...sk, ...generic])];
+}
+
 export async function fetchMemberRoles(from: string, to: string): Promise<MemberRole[]> {
   if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) {
     return [
-      { accountId: 'acc-tomas', displayName: 'Tomáš Kraus', role: 'user' },
-      { accountId: 'acc-hana', displayName: 'Hana Nová', role: 'user' },
+      { accountId: 'acc-tomas', displayName: 'Tomáš Kraus', role: 'user', country: 'CZ' },
+      { accountId: 'acc-hana', displayName: 'Hana Nová', role: 'user', country: 'CZ' },
     ];
   }
 
   const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
   const token = process.env.ACTIVITY_TIMELINE_AUTH_TOKEN!.trim();
-  const teamIds = (process.env.ACTIVITY_TIMELINE_TEAM_IDS ?? '').trim()
-    .split(',').map(s => s.trim()).filter(Boolean);
+  const teamIds = getAllTeamIds();
+  const teamCountryMap = buildTeamCountryMap();
 
   if (teamIds.length === 0) return [];
 
@@ -113,6 +133,7 @@ export async function fetchMemberRoles(from: string, to: string): Promise<Member
   const roles: MemberRole[] = [];
 
   for (const teamId of teamIds) {
+    const country = teamCountryMap.get(teamId);
     let startAt = 0;
     let page = 0;
 
@@ -124,7 +145,13 @@ export async function fetchMemberRoles(from: string, to: string): Promise<Member
         startAt: String(startAt),
       });
 
-      const response = await axios.get(`${baseUrl}/rest/api/1/timeline?${params.toString()}`);
+      let response: any;
+      try {
+        response = await axios.get(`${baseUrl}/rest/api/1/timeline?${params.toString()}`);
+      } catch (err: any) {
+        logger.warn('AT member roles — team přeskočen', { teamId, status: err?.response?.status });
+        break;
+      }
       const raw = response.data;
       const members: any[] = raw?.members ?? [];
       const hasMore: boolean = raw?.hasMore ?? false;
@@ -135,7 +162,7 @@ export async function fetchMemberRoles(from: string, to: string): Promise<Member
         if (!accountId || seen.has(accountId)) continue;
         seen.add(accountId);
         const displayName: string = member.userRealName ?? member.username ?? accountId;
-        roles.push({ accountId, displayName, role: roleFromPosition(member.personPosition?.positionNameLong) });
+        roles.push({ accountId, displayName, role: roleFromPosition(member.personPosition?.positionNameLong), country });
       }
 
       const fetched = startAt + members.length;
@@ -150,7 +177,7 @@ export async function fetchMemberRoles(from: string, to: string): Promise<Member
   return roles;
 }
 
-export async function fetchAbsences(from: string, to: string, type?: ActivityTimelineEvent['type']): Promise<ActivityTimelineEvent[]> {
+export async function fetchAbsences(from: string, to: string, knownMemberRoles?: MemberRole[], type?: ActivityTimelineEvent['type']): Promise<ActivityTimelineEvent[]> {
   if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) {
     logger.info('Načítám mock absence z Activity Timeline', { from, to });
     const all = generateMockAbsences(from, to);
@@ -159,18 +186,27 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
 
   const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
   const token = process.env.ACTIVITY_TIMELINE_AUTH_TOKEN!.trim();
-  const teamIds = (process.env.ACTIVITY_TIMELINE_TEAM_IDS ?? '').trim()
-    .split(',').map(s => s.trim()).filter(Boolean);
+  const teamIds = getAllTeamIds();
 
   if (teamIds.length === 0) {
-    logger.warn('ACTIVITY_TIMELINE_TEAM_IDS není nastaven — absence se nepřenesou');
+    logger.warn('ACTIVITY_TIMELINE_TEAM_IDS / CZ_TEAM_IDS / SK_TEAM_IDS není nastaven — absence se nepřenesou');
     return [];
+  }
+
+  const teamCountryMap = buildTeamCountryMap();
+  // Map accountId → member's own country (from country-specific team membership)
+  const memberCountryMap = new Map<string, 'CZ' | 'SK'>();
+  if (knownMemberRoles) {
+    for (const m of knownMemberRoles) {
+      if (m.country) memberCountryMap.set(m.accountId, m.country);
+    }
   }
 
   const seen = new Set<string>();
   const allEvents: ActivityTimelineEvent[] = [];
 
   for (const teamId of teamIds) {
+    const teamCountry = teamCountryMap.get(teamId); // 'CZ', 'SK', or undefined for generic
     let startAt = 0;
     let page = 0;
     let totalEvents = 0;
@@ -186,7 +222,13 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
       const url = `${baseUrl}/rest/api/1/timeline?${params.toString()}`;
       logger.info('Activity Timeline request', { url: url.replace(token, '***'), page, startAt });
 
-      const response = await axios.get(url);
+      let response: any;
+      try {
+        response = await axios.get(url);
+      } catch (err: any) {
+        logger.warn('Activity Timeline team přeskočen', { teamId, status: err?.response?.status });
+        break;
+      }
       const raw = response.data;
       const members: any[] = raw?.members ?? [];
       const total: number | undefined = raw?.total;
@@ -215,16 +257,6 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
         });
       }
 
-      // LOG: temporary — ukaz pozice vsech memberu
-      if (page === 0) {
-        const positions = members.map((m: any) => ({
-          name: m.userRealName,
-          accountId: m.username,
-          position: m.personPosition?.positionNameLong ?? '(žádná)',
-        }));
-        logger.info('AT member positions', { positions });
-      }
-
       for (const member of members) {
         const accountId: string = member.username ?? '';
         const username: string = member.userRealName ?? member.username ?? '';
@@ -234,6 +266,13 @@ export async function fetchAbsences(from: string, to: string, type?: ActivityTim
           const summary: string = issue.summary ?? '';
           const absenceType = resolveAbsenceType(issueType, summary);
           if (!absenceType) continue;
+
+          // For HOLIDAY events from a country-specific team, skip if member belongs to a different country.
+          // Prevents CZ team holidays (e.g. May 8) from being written for SK employees.
+          if (absenceType === 'HOLIDAY' && teamCountry) {
+            const memberCountry = memberCountryMap.get(accountId);
+            if (memberCountry && memberCountry !== teamCountry) continue;
+          }
 
           const id = String(issue.id ?? issue.issueKey ?? '');
           if (seen.has(id)) continue;

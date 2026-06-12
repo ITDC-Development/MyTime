@@ -84,7 +84,7 @@ export function Sidebar() {
                 sx={{
                   mx: 1, borderRadius: 1.5,
                   '&.Mui-selected': {
-                    backgroundColor: 'rgba(44,140,153,0.1)',
+                    backgroundColor: 'rgba(139,170,69,0.1)',
                     color: BRAND.teal,
                     borderLeft: `3px solid ${BRAND.teal}`,
                     pl: 1.6,
@@ -112,7 +112,7 @@ export function Sidebar() {
                 sx={{
                   mx: 1, borderRadius: 1.5,
                   '&.Mui-selected': {
-                    backgroundColor: 'rgba(44,140,153,0.1)',
+                    backgroundColor: 'rgba(139,170,69,0.1)',
                     color: BRAND.teal,
                     borderLeft: `3px solid ${BRAND.teal}`,
                     pl: 1.6,
@@ -131,7 +131,7 @@ export function Sidebar() {
 
       <Divider />
       <Box sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1.5 }}>
-        <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(44,140,153,0.15)', color: BRAND.teal, fontSize: 12 }}>
+        <Avatar sx={{ width: 32, height: 32, bgcolor: 'rgba(139,170,69,0.15)', color: BRAND.teal, fontSize: 12 }}>
           {initials}
         </Avatar>
         <Box sx={{ flex: 1, minWidth: 0 }}>

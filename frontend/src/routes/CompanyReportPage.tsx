@@ -308,7 +308,7 @@ export function CompanyReportPage() {
 
   const columns: ColumnId[] = useMemo(() => {
     const raw = (preferences?.columns.companyReport as string[]) ?? ['date', 'from', 'to', 'issue', 'name', 'hours'];
-    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : c === 'parent' ? ['parentKey', 'parentName'] : [c as ColumnId]);
     const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
     return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);
@@ -384,7 +384,6 @@ export function CompanyReportPage() {
                 <Metric label="Dovolená" value={`${formatHours(stats.vacationHours)} h`} />
                 <Metric label="Nemoc" value={`${formatHours(stats.sickHours)} h`} />
                 <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
-                <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
               </Grid>
             )}
             <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ mb: 1 }}>
@@ -444,7 +443,7 @@ export function CompanyReportPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <Grid item xs={12} sm={6} md={4}>
+    <Grid item xs={12} sm={6} md={3}>
       <Card sx={{ background: '#f8f9f9' }}>
         <CardContent>
           <Typography variant="caption" color="text.secondary">{label}</Typography>

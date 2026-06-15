@@ -125,7 +125,7 @@ export function ProjectReportPage() {
   const showPauses = preferences?.showPauses ?? true;
   const columns: ColumnId[] = useMemo(() => {
     const raw = (preferences?.columns.projectReport as string[]) ?? ['date', 'from', 'to', 'issue', 'name', 'hours'];
-    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    const migrated = raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : c === 'parent' ? ['parentKey', 'parentName'] : [c as ColumnId]);
     const nonLocked = migrated.filter(c => !LOCKED_COLUMNS.includes(c));
     return [...LOCKED_COLUMNS, ...nonLocked];
   }, [preferences]);

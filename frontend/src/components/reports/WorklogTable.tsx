@@ -18,7 +18,8 @@ interface Props {
 }
 
 const LABELS: Record<ColumnId, string> = {
-  user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název', parent: 'Parent',
+  user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název',
+  parentKey: 'Parent - klíč', parentName: 'Parent - název',
   sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas',
 };
 
@@ -114,7 +115,8 @@ function cellValue(row: LinearWorklog, col: ColumnId, showOvertime = false) {
         </Box>
       );
     case 'name': return row.isPause ? '—' : (row.summary || '—');
-    case 'parent': return row.parentKey ? `${row.parentKey} · ${row.parentSummary}` : '—';
+    case 'parentKey': return row.parentKey || '—';
+    case 'parentName': return row.parentSummary || '—';
     case 'sprint': return row.sprint || '—';
     case 'component': return row.components.join(', ') || '—';
     case 'hours': return row.isPause ? '—' : formatHours(row.hours);

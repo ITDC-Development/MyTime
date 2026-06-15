@@ -153,7 +153,6 @@ export function EmployeeSummaryPage() {
               <Metric label="Dovolená" value={`${formatHours(stats.vacationHours)} h`} />
               <Metric label="Nemoc" value={`${formatHours(stats.sickHours)} h`} />
               <Metric label="Přesčas" value={`${formatHours(stats.overtimeHours)} h`} />
-              <Metric label="Dnů s přesčasem" value={`${stats.daysWithOvertime}`} />
             </Grid>
 
             {absences.length > 0 && (
@@ -198,7 +197,7 @@ export function EmployeeSummaryPage() {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <Grid item xs={12} sm={6} md={4}>
+    <Grid item xs={12} sm={6} md={3}>
       <Card sx={{ background: '#f8f9f9' }}>
         <CardContent>
           <Typography variant="caption" color="text.secondary">{label}</Typography>

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Checkbox } from '@mui/material';
+import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Checkbox, Autocomplete, TextField, Chip } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
 import { useMembers } from '../hooks/useMembers';
@@ -30,6 +30,7 @@ export function OverviewPage() {
   const [month, setMonth] = useState(curM);
   const [selected, setSelected] = useState<string[]>([]);
   const [pending, setPending] = useState<null | (() => void)>(null);
+  const [selectedComponents, setSelectedComponents] = useState<string[]>([]);
 
   const isAdmin = profile?.role === 'admin';
   const accountIds = isAdmin && selected.length === 0 ? null : selected;
@@ -37,7 +38,7 @@ export function OverviewPage() {
   const showPauses = preferences?.showPauses ?? true;
   const stored = useMemo(() => {
     const raw = (preferences?.columns.overview as string[]) ?? ['user', 'date', 'from', 'to', 'issue', 'name', 'hours'];
-    return raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : [c as ColumnId]);
+    return raw.flatMap((c): ColumnId[] => c === 'period' ? ['from', 'to'] : c === 'parent' ? ['parentKey', 'parentName'] : [c as ColumnId]);
   }, [preferences]);
 
   const columns = useMemo(() => {
@@ -53,14 +54,27 @@ export function OverviewPage() {
     });
   }, [linear, showPauses]);
 
+  const availableComponents = useMemo(() => {
+    const set = new Set<string>();
+    filtered.forEach(r => {
+      if (!r.isPause && !r.isAbsence) r.components.forEach(c => { if (c) set.add(c); });
+    });
+    return [...set].sort();
+  }, [filtered]);
+
+  const displayedRows = useMemo(() => {
+    if (selectedComponents.length === 0) return filtered;
+    return filtered.filter(r => r.components.some(c => selectedComponents.includes(c)));
+  }, [filtered, selectedComponents]);
+
   const rowsForExport = useMemo(() =>
-    filtered.map(r => {
+    displayedRows.map(r => {
       const obj: Record<string, unknown> = {};
       for (const c of columns) {
         obj[labelOf(c)] = renderForExport(r, c);
       }
       return obj;
-    }), [filtered, columns]);
+    }), [displayedRows, columns]);
 
   const filename = useMemo(() => {
     const mm = String(month).padStart(2, '0');
@@ -130,6 +144,24 @@ export function OverviewPage() {
             Vybrat vše
           </Button>
           <MonthSelect year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
+          <Autocomplete
+            multiple
+            options={availableComponents}
+            value={selectedComponents.filter(c => availableComponents.includes(c))}
+            onChange={(_, v) => setSelectedComponents(v)}
+            disableCloseOnSelect
+            disabled={availableComponents.length === 0}
+            size="small"
+            sx={{ minWidth: 220 }}
+            renderInput={(params) => (
+              <TextField {...params} label="Komponenty" size="small" />
+            )}
+            renderTags={(value) =>
+              value.length <= 2
+                ? value.map((opt, i) => <Chip key={opt} label={opt} size="small" sx={{ mr: 0.5 }} onDelete={() => setSelectedComponents(prev => prev.filter(c => c !== opt))} />)
+                : <Typography variant="body2" sx={{ pl: 0.5 }}>{value.length} vybrány</Typography>
+            }
+          />
           <PauseToggle checked={showPauses} onChange={v => update({ showPauses: v })} />
         </Stack>
 
@@ -149,10 +181,10 @@ export function OverviewPage() {
           <Alert severity="info">Vyber alespoň jednoho uživatele pro zobrazení a export.</Alert>
         ) : (
           <>
-            <WorklogTable rows={filtered} columns={columns} isLocked />
+            <WorklogTable rows={displayedRows} columns={columns} isLocked />
             <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 2 }}>
               <Typography variant="body2" color="text.secondary">
-                Vybráno {selected.length} {selected.length === 1 ? 'zaměstnanec' : 'zaměstnanců'} · {filtered.filter(r => !r.isPause).length} worklogů
+                Vybráno {selected.length} {selected.length === 1 ? 'zaměstnanec' : 'zaměstnanců'} · {displayedRows.filter(r => !r.isPause).length} worklogů
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center">
                 <ExportButtons rows={rowsForExport} filename={filename} title={title} onExport={async () => {
@@ -198,7 +230,8 @@ export function OverviewPage() {
 }
 
 function labelOf(c: ColumnId): string {
-  return { user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název', parent: 'Parent',
+  return { user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název',
+    parentKey: 'Parent - klíč', parentName: 'Parent - název',
     sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas' }[c];
 }
 
@@ -224,7 +257,8 @@ function renderForExport(r: { user: string; date: string; startMinutes: number; 
     case 'to': return minutesToHHMM(r.endMinutes);
     case 'issue': return r.isPause ? decodeHtml(r.summary) : (r.issueKey || '');
     case 'name': return r.isPause ? '' : decodeHtml(r.summary);
-    case 'parent': return r.parentKey ? `${r.parentKey} ${decodeHtml(r.parentSummary)}` : '';
+    case 'parentKey': return r.parentKey || '';
+    case 'parentName': return r.parentKey ? decodeHtml(r.parentSummary) : '';
     case 'sprint': return decodeHtml(r.sprint);
     case 'component': return r.components.map(decodeHtml).join(', ');
     case 'hours': return r.isPause ? '' : formatHours(r.hours);

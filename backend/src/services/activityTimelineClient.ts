@@ -27,6 +27,9 @@ const BOOKING_SUMMARY_MAP: Record<string, ActivityTimelineEvent['type']> = {
   'volno':      'DAY_OFF',
 };
 
+// Eventy s tímto názvem se nepočítají jako nemoc, i když mají issueType SICK_LEAVE
+const SICK_LEAVE_EXCLUSIONS = new Set(['lékař', 'lekar', 'lékar', 'lekár', 'doctor', 'doctor visit']);
+
 function extractBookingEventType(summary: string): string {
   const s = summary.trim();
 
@@ -42,10 +45,21 @@ function extractBookingEventType(summary: string): string {
 }
 
 function resolveAbsenceType(issueType: string, summary: string): ActivityTimelineEvent['type'] | null {
+  const summaryLower = summary.trim().toLowerCase();
+
+  // Eventy pojmenované jako návštěva lékaře se vylučují bez ohledu na issueType
+  if (SICK_LEAVE_EXCLUSIONS.has(summaryLower)) return null;
+
   if (ISSUE_TYPE_MAP[issueType]) return ISSUE_TYPE_MAP[issueType];
 
   if (issueType === 'BOOKING') {
     const candidate = extractBookingEventType(summary);
+    // Pokud část za " | " označuje návštěvu lékaře, vyloučit (např. "[Nemoc] Team | Lékař")
+    const pipeIdx = summary.lastIndexOf(' | ');
+    if (pipeIdx !== -1) {
+      const activity = summary.slice(pipeIdx + 3).trim().toLowerCase();
+      if (SICK_LEAVE_EXCLUSIONS.has(activity)) return null;
+    }
     if (BOOKING_SUMMARY_MAP[candidate]) return BOOKING_SUMMARY_MAP[candidate];
   }
 

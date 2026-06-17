@@ -5,7 +5,7 @@ export function minutesToHHMM(min: number): string {
 }
 
 export function formatHours(hours: number): string {
-  return hours.toFixed(1).replace('.', ',');
+  return hours.toFixed(2).replace('.', ',');
 }
 
 export function formatPeriod(startMin: number, endMin: number): string {

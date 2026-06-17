@@ -1,7 +1,6 @@
 {
   "projects": {
-    "default": "demo-mytime",
-    "demo": "mytime-demo"
+    "default": "mytime-497508"
   },
   "targets": {},
   "etags": {}

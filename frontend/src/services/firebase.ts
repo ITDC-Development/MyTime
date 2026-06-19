@@ -15,7 +15,6 @@ if (missingKeys.length > 0) {
   console.error('[Firebase] Missing env vars:', missingKeys.join(', '));
 }
 
-console.log('[Firebase] config:', firebaseConfig);
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);

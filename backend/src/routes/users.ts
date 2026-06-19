@@ -5,10 +5,16 @@ import { logger } from '../utils/logger';
 
 const router = Router();
 
+const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS || '').split(',').map(s => s.trim()).filter(Boolean);
+
 router.post('/', authenticate, requireAdmin, async (req: AuthedRequest, res) => {
   const { email, displayName } = req.body as { email: string; displayName: string };
   if (!email || !displayName) {
     return res.status(400).json({ error: 'email a displayName jsou povinné' });
+  }
+  const emailDomain = email.split('@')[1]?.toLowerCase();
+  if (allowedDomains.length && !allowedDomains.includes(emailDomain)) {
+    return res.status(400).json({ error: 'Email není z povolené domény.' });
   }
   try {
     const userRecord = await authAdmin().createUser({
@@ -41,7 +47,7 @@ router.post('/', authenticate, requireAdmin, async (req: AuthedRequest, res) => 
       return res.status(409).json({ error: 'Uživatel s tímto emailem již existuje.' });
     }
     logger.error('Vytvoření uživatele selhalo', { err: String(err) });
-    res.status(500).json({ error: String(err) });
+    res.status(500).json({ error: 'Vytvoření uživatele selhalo.' });
   }
 });
 

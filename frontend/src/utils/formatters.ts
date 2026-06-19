@@ -5,7 +5,9 @@ export function minutesToHHMM(min: number): string {
 }
 
 export function formatHours(hours: number): string {
-  return hours.toFixed(2).replace('.', ',');
+  const rounded = Math.round(hours * 100) / 100;
+  const str = rounded.toFixed(2).replace('.', ',');
+  return str.replace(',00', '').replace(/,(\d)0$/, ',$1');
 }
 
 export function formatPeriod(startMin: number, endMin: number): string {

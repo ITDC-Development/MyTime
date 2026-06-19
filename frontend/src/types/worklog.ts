@@ -74,4 +74,5 @@ export interface LinearWorklog {
   priority: string;
   isAbsence?: boolean;
   absenceType?: 'VACATION' | 'SICK_LEAVE' | 'DAY_OFF' | 'HOLIDAY';
+  isTermin?: boolean;
 }

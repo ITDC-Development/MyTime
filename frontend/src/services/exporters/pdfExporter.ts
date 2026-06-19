@@ -191,6 +191,36 @@ export async function exportPdf(
   doc.save(`${filename}.pdf`);
 }
 
+/** Vrátí PDF jako base64 string (bez triggeru downloadu). */
+export async function generatePdfBase64(
+  rows: Record<string, unknown>[],
+  title: string,
+  summary?: PdfSummaryItem[],
+): Promise<string> {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  if (rows.length > 0) {
+    await renderContainerToDoc(doc, buildContainer(title, rows, summary), false);
+  }
+  return doc.output('datauristring').split(',')[1]; // base64 část
+}
+
+/** Vrátí pole { name, base64 } — jeden soubor za sekci. */
+export async function generatePdfSectionsAsFiles(
+  sections: PdfSection[],
+  filenameFor: (name: string) => string,
+  titlePrefix: string,
+): Promise<{ name: string; contentBase64: string }[]> {
+  const results: { name: string; contentBase64: string }[] = [];
+  for (const s of sections) {
+    if (s.rows.length === 0) continue;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const sectionTitle = `${titlePrefix}\n${s.name}`;
+    await renderContainerToDoc(doc, buildContainer(sectionTitle, s.rows, s.summary), false);
+    results.push({ name: filenameFor(s.name), contentBase64: doc.output('datauristring').split(',')[1] });
+  }
+  return results;
+}
+
 export async function exportPdfBulk(sections: PdfSection[], filename: string, title: string) {
   const nonEmpty = sections.filter(s => s.rows.length > 0);
   if (nonEmpty.length === 0) return;

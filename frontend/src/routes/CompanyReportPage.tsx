@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Alert, Button, ToggleButtonGroup, ToggleButton } from '@mui/material';
-import { PictureAsPdf } from '@mui/icons-material';
-import { exportPdf, exportPdfBulk, type PdfSummaryItem, type PdfSection } from '../services/exporters/pdfExporter';
+import { PictureAsPdf, Email } from '@mui/icons-material';
+import { exportPdf, exportPdfBulk, generatePdfBase64, generatePdfSectionsAsFiles, type PdfSummaryItem, type PdfSection } from '../services/exporters/pdfExporter';
+import { createOutlookDraft } from '../services/graphMailService';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -53,7 +54,14 @@ export function CompanyReportPage() {
     if (member?.country !== countryFilter) setSelected([]);
   }, [countryFilter]);
 
-  const accountIds = isAdmin && selected.length === 0 ? null : selected;
+  const countryAccountIds = useMemo(
+    () => countryFilter === 'all'
+      ? null
+      : members.filter(m => m.role === 'user' && m.country === countryFilter).map(m => m.accountId),
+    [countryFilter, members]
+  );
+
+  const accountIds = isAdmin && selected.length === 0 ? countryAccountIds : selected;
   const accountId = selected[0] ?? null;
 
   const memberCountry = useMemo(
@@ -65,6 +73,8 @@ export function CompanyReportPage() {
   const [editTarget, setEditTarget] = useState<LinearWorklog | null>(null);
   const [historyTarget, setHistoryTarget] = useState<LinearWorklog | null>(null);
   const [isBulkExporting, setIsBulkExporting] = useState(false);
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const handleDeleteEdit = async (worklog: LinearWorklog) => {
     if (!profile) return;
@@ -339,6 +349,112 @@ export function CompanyReportPage() {
     { label: 'Dnů s přesčasem', value: `${stats.daysWithOvertime}` },
   ];
 
+  const handleSendEmail = async () => {
+    setIsSendingEmail(true);
+    setEmailError(null);
+    try {
+      const mm = String(month).padStart(2, '0');
+      const subject = `Docházka – ${monthLabel(year, month)}`;
+      const body = `<p>V příloze naleznete docházku za <strong>${monthLabel(year, month)}</strong>.</p>`;
+
+      let attachments: { name: string; contentBase64: string }[];
+
+      if (accountId) {
+        // Jeden zaměstnanec — jeden PDF
+        const base64 = await generatePdfBase64(pdfRows, `Docházka – ${selectedUserName} – ${monthLabel(year, month)}`, pdfSummary);
+        attachments = [{ name: `dochazka-${sanitizeName(selectedUserName)}-${year}-${mm}.pdf`, contentBase64: base64 }];
+      } else {
+        // Skupina / všichni — PDF za každého zaměstnance zvlášť
+        const { from, to } = monthRange(year, month);
+        const employeesToExport = members
+          .filter(m => m.role === 'user' && (countryFilter === 'all' || m.country === countryFilter))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, 'cs'));
+
+        const fetchNagerHolidays = async (country: 'CZ' | 'SK') => {
+          try {
+            const r = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${year}/${country}`);
+            if (!r.ok) return new Set<string>();
+            const data: { date: string }[] = await r.json();
+            return new Set(data.map(h => h.date));
+          } catch { return new Set<string>(); }
+        };
+        const [czHolidays, skHolidays] = await Promise.all([fetchNagerHolidays('CZ'), fetchNagerHolidays('SK')]);
+
+        const allAbsences: Absence[] = [];
+        const ids = employeesToExport.map(m => m.accountId);
+        for (let i = 0; i < ids.length; i += 30) {
+          const snap = await getDocs(query(
+            collection(firestore, 'absences'),
+            where('accountId', 'in', ids.slice(i, i + 30)),
+            where('date', '>=', from),
+            where('date', '<=', to),
+          ));
+          allAbsences.push(...snap.docs.map(d => d.data() as import('../types/jira').Absence));
+        }
+
+        const linearByAccount = new Map<string, typeof linear>();
+        for (const row of linear) {
+          if (row.isPause) continue;
+          if (!linearByAccount.has(row.accountId)) linearByAccount.set(row.accountId, []);
+          linearByAccount.get(row.accountId)!.push(row);
+        }
+
+        const sections: PdfSection[] = [];
+        for (const emp of employeesToExport) {
+          const empRows = linearByAccount.get(emp.accountId) ?? [];
+          if (empRows.length === 0) continue;
+          const empAbsences = allAbsences.filter(a => a.accountId === emp.accountId);
+          const atHolidays = new Set(empAbsences.filter(a => a.type === 'HOLIDAY').map(a => a.date));
+          const fallback = emp.country === 'CZ' ? czHolidays : emp.country === 'SK' ? skHolidays : new Set<string>();
+          const holidayDates = atHolidays.size > 0 ? atHolidays : fallback;
+
+          let workingDays = 0;
+          const cur = new Date(from + 'T00:00:00Z');
+          const end = new Date(to + 'T00:00:00Z');
+          while (cur <= end) {
+            const dow = cur.getUTCDay();
+            const ds = cur.toISOString().slice(0, 10);
+            if (dow !== 0 && dow !== 6 && !holidayDates.has(ds)) workingDays++;
+            cur.setUTCDate(cur.getUTCDate() + 1);
+          }
+          const expectedH = workingDays * 8;
+          const vacH = empAbsences.filter(a => a.type === 'VACATION' || a.type === 'DAY_OFF').reduce((s, a) => s + a.hours, 0);
+          const sickH = empAbsences.filter(a => a.type === 'SICK_LEAVE').reduce((s, a) => s + a.hours, 0);
+          const workedH = totalWorkedHours(empRows);
+          const overtimeH = Math.max(0, workedH + vacH - expectedH);
+
+          sections.push({
+            name: emp.displayName,
+            summary: [
+              { label: 'Odpracováno / Fond', value: `${formatHours(workedH)} h / ${formatHours(expectedH)} h` },
+              { label: 'Dovolená', value: `${formatHours(vacH)} h` },
+              { label: 'Nemoc', value: `${formatHours(sickH)} h` },
+              { label: 'Přesčas', value: `${formatHours(overtimeH)} h` },
+            ],
+            rows: empRows.map(r => ({
+              'Datum': r.date, 'Od': fmt(r.startMinutes), 'Do': fmt(r.endMinutes),
+              'Hodiny': r.hours.toFixed(2), 'Issue': r.issueKey, 'Popis': r.summary,
+            })),
+          });
+        }
+
+        const titlePrefix = `Docházka – ${monthLabel(year, month)}`;
+        attachments = await generatePdfSectionsAsFiles(
+          sections,
+          name => `dochazka-${sanitizeName(name)}-${year}-${mm}.pdf`,
+          titlePrefix,
+        );
+      }
+
+      const draftLink = await createOutlookDraft(subject, body, attachments);
+      window.open(draftLink, '_blank');
+    } catch (err: any) {
+      setEmailError(err?.message ?? String(err));
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
+
   return (
     <Box>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1 }}>
@@ -408,6 +524,18 @@ export function CompanyReportPage() {
                   {isBulkExporting ? 'Generuji PDF…' : `Exportovat ${countryFilter === 'all' ? 'vše' : countryFilter} PDF`}
                 </Button>
               )}
+              {isAdmin && (
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<Email />}
+                  disabled={isSendingEmail}
+                  onClick={handleSendEmail}
+                >
+                  {isSendingEmail ? 'Připravuji…' : 'Odeslat Email'}
+                </Button>
+              )}
+              {emailError && <Alert severity="error" sx={{ mt: 1 }}>{emailError}</Alert>}
             </Stack>
             <WorklogTable
               rows={combinedRows}
@@ -439,6 +567,10 @@ export function CompanyReportPage() {
       <HistoryDialog open={Boolean(historyTarget)} worklogId={historyTarget?.worklogId ?? null} onClose={() => setHistoryTarget(null)} />
     </Box>
   );
+}
+
+function sanitizeName(name: string): string {
+  return name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

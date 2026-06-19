@@ -15,6 +15,7 @@ export interface RawWorklog {
   date: string; // YYYY-MM-DD pro indexaci
   issueType: string;
   priority: string;
+  source?: 'jira' | 'activity_timeline';
 }
 
 export interface EditedWorklog {

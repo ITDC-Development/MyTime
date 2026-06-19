@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import {
   Box, Typography, Paper, Stack, Button, TextField, MenuItem, Select,
   FormControl, InputLabel, Chip, OutlinedInput, CircularProgress, Alert,
   Table, TableHead, TableBody, TableFooter, TableRow, TableCell, TableContainer,
-  TableSortLabel, FormControlLabel, Checkbox,
+  TableSortLabel, FormControlLabel, Checkbox, Dialog, DialogTitle, DialogContent,
+  DialogActions, RadioGroup, Radio,
 } from '@mui/material';
 import { AutoAwesome } from '@mui/icons-material';
 import { collection, getDocs, query, where } from 'firebase/firestore';
@@ -13,6 +14,10 @@ import { useMembers } from '../hooks/useMembers';
 import { UserSelect } from '../components/common/UserSelect';
 import { api } from '../services/api';
 import { ExportButtons } from '../components/export/ExportButtons';
+import { exportCsv } from '../services/exporters/csvExporter';
+import { exportXlsx } from '../services/exporters/xlsxExporter';
+import { exportPdf } from '../services/exporters/pdfExporter';
+import { ExportFormat, ExportLang, EXPORT_FILENAME_PREFIX } from '../types/export';
 import type { RawWorklog, EditedWorklog, ManualWorklog } from '../types/worklog';
 
 type SmartReportRow = { _values: Record<string, number> } & Record<string, string>;
@@ -91,6 +96,11 @@ export function SmartReportsPage() {
   const [minHours,   setMinHours]   = useState<number | ''>('');
   const [hideZero,   setHideZero]   = useState(false);
 
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportLang, setExportLang] = useState<ExportLang>('cs');
+  const pendingFormatRef = useRef<ExportFormat | null>(null);
+  const pendingResolveRef = useRef<((handled: boolean) => void) | null>(null);
+
   const handleSort = (key: string) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortKey(key); setSortDir('desc'); }
@@ -130,7 +140,8 @@ export function SmartReportsPage() {
       // Aplikuj overlay úprav na raw worklogy
       const merged: RawWorklog[] = raw.map(r => {
         const e = editedMap[r.worklogId];
-        if (!e) return r;
+        const rawComment = (r.issueType === 'TERMIN' && r.comment.startsWith('[')) ? '' : r.comment;
+        if (!e) return { ...r, comment: rawComment };
         return {
           ...r,
           seconds: e.seconds ?? r.seconds,
@@ -141,7 +152,7 @@ export function SmartReportsPage() {
           parentSummary: e.parentSummary ?? r.parentSummary,
           components: e.components ?? r.components,
           sprint: e.sprint ?? r.sprint,
-          comment: e.comment ?? r.comment,
+          comment: e.comment ?? rawComment,
         };
       });
 
@@ -317,8 +328,9 @@ export function SmartReportsPage() {
     });
   }, [result]);
 
-  const exportFilename = `chytre_prehledy_${dateFrom}_${dateTo}`;
-  const exportTitle    = `Chytré přehledy · ${dateFrom} – ${dateTo}`;
+  const buildExportFilename = (lang: ExportLang) =>
+    `${EXPORT_FILENAME_PREFIX[lang]}_prehledy_${dateFrom}_${dateTo}`;
+  const exportTitle = `Chytré přehledy · ${dateFrom} – ${dateTo}`;
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -495,7 +507,13 @@ export function SmartReportsPage() {
             <Typography variant="subtitle1" fontWeight={600}>
               Výsledek · {displayedRows.length}{displayedRows.length !== result.rows.length ? ` / ${result.rows.length}` : ''} řádků
             </Typography>
-            <ExportButtons rows={exportRows} filename={exportFilename} title={exportTitle} />
+            <ExportButtons rows={exportRows} filename={buildExportFilename(exportLang)} title={exportTitle} onExport={async (format) => {
+              return new Promise<boolean>(resolve => {
+                pendingFormatRef.current = format;
+                pendingResolveRef.current = resolve;
+                setExportDialogOpen(true);
+              });
+            }} />
           </Stack>
 
           {/* Filtrovací panel */}
@@ -626,6 +644,42 @@ export function SmartReportsPage() {
           </TableContainer>
         </Paper>
       )}
+
+      <Dialog open={exportDialogOpen} onClose={() => {
+        pendingResolveRef.current?.(true);
+        pendingResolveRef.current = null;
+        pendingFormatRef.current = null;
+        setExportDialogOpen(false);
+      }}>
+        <DialogTitle>Jazyk exportu</DialogTitle>
+        <DialogContent>
+          <RadioGroup row value={exportLang} onChange={e => setExportLang(e.target.value as ExportLang)}>
+            <FormControlLabel value="cs" control={<Radio size="small" />} label="Čeština" />
+            <FormControlLabel value="de" control={<Radio size="small" />} label="Němčina" />
+            <FormControlLabel value="en" control={<Radio size="small" />} label="English" />
+          </RadioGroup>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            pendingResolveRef.current?.(true);
+            pendingResolveRef.current = null;
+            pendingFormatRef.current = null;
+            setExportDialogOpen(false);
+          }}>Zrušit</Button>
+          <Button variant="contained" onClick={async () => {
+            const lang = exportLang;
+            const format = pendingFormatRef.current;
+            const fname = buildExportFilename(lang);
+            if (format === 'xlsx') await exportXlsx(exportRows, fname);
+            else if (format === 'csv') exportCsv(exportRows, fname);
+            else if (format === 'pdf') exportPdf(exportRows, fname, exportTitle);
+            pendingResolveRef.current?.(true);
+            pendingResolveRef.current = null;
+            pendingFormatRef.current = null;
+            setExportDialogOpen(false);
+          }}>Exportovat</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

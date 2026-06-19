@@ -34,11 +34,15 @@ service cloud.firestore {
       return userProfile(request.auth.uid).jiraAccountId == accountId;
     }
 
-    // Pozvánky – admin vytváří, kdokoliv může číst (token je tajný UUID), pozvaný uživatel označí jako použitou
+    // Pozvánky – admin vytváří (jen povolené domény), pozvaný uživatel může přečíst a označit jako použitou
     match /invites/{token} {
-      allow read: if true;
-      allow create: if isAdmin();
-      allow update: if isAuthenticated();
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isAllowedDomain(request.resource.data.email);
+      // Pouze příjemce pozvánky může změnit pole `used` na true
+      allow update: if isAuthenticated() &&
+                       request.auth.token.email == resource.data.email &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['used']) &&
+                       request.resource.data.used == true;
       allow delete: if isAdmin();
     }
 
@@ -46,8 +50,10 @@ service cloud.firestore {
     match /users/{userId} {
       // Self-read; admin can read all
       allow read: if isSelf(userId) || isAdmin();
-      // Vytvoření účtu povolen jen sobě – token pozvánky je ověřen klientsky
-      allow create: if isSelf(userId);
+      // Vytvoření jen sobě, jen povolená doména, role musí být 'user', status musí být 'pending'
+      allow create: if isSelf(userId) &&
+                       isAllowedDomain(request.resource.data.email) &&
+                       request.resource.data.role == 'user';
       // Self-update of preferences only; admin can update role/status
       allow update: if
         (isSelf(userId) &&

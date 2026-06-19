@@ -331,3 +331,157 @@ export async function fetchAbsences(from: string, to: string, knownMemberRoles?:
   if (type) return allEvents.filter(a => a.type === type);
   return allEvents;
 }
+
+function isTerminBooking(summary: string): boolean {
+  const key = extractBookingEventType(summary);
+  return key === 'termín' || key === 'termin';
+}
+
+function parseTerminTags(summary: string): {
+  issueKey: string;
+  parentKey: string;
+  parentSummary: string;
+  components: string[];
+  sprint: string;
+  comment: string;
+  summary: string;
+} {
+  const tags: Record<string, string> = {};
+  const pattern = /\[([^\]:]+):\s*([^\]]+)\]/g;
+  let m;
+  while ((m = pattern.exec(summary)) !== null) {
+    tags[m[1].trim().toLowerCase()] = m[2].trim();
+  }
+  return {
+    issueKey:      tags['issue'] ?? '',
+    parentKey:     tags['parent-klic'] ?? tags['parent-klíč'] ?? '',
+    parentSummary: tags['parent-nazev'] ?? tags['parent-název'] ?? '',
+    components:    tags['komponenta'] ? [tags['komponenta']] : [],
+    sprint:        tags['sprint'] ?? '',
+    comment:       tags['komentar'] ?? tags['komentář'] ?? '',
+    summary:       tags['nazev'] ?? tags['název'] ?? '',
+  };
+}
+
+export interface AtWorklogEntry {
+  worklogId: string;
+  user: string;
+  accountId: string;
+  summary: string;
+  parentKey: string;
+  parentSummary: string;
+  parentIssueType: string;
+  components: string[];
+  sprint: string;
+  comment: string;
+  seconds: number;
+  started: string;
+  issueKey: string;
+  date: string;
+  issueType: 'TERMIN';
+  priority: string;
+  source: 'activity_timeline';
+}
+
+export async function fetchTerminEvents(from: string, to: string): Promise<AtWorklogEntry[]> {
+  if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) return [];
+
+  const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
+  const token = process.env.ACTIVITY_TIMELINE_AUTH_TOKEN!.trim();
+  const teamIds = getAllTeamIds();
+  if (teamIds.length === 0) return [];
+
+  const seen = new Set<string>();
+  const result: AtWorklogEntry[] = [];
+
+  for (const teamId of teamIds) {
+    let startAt = 0;
+    let page = 0;
+
+    while (true) {
+      const params = new URLSearchParams({
+        start: from, end: to, teamId,
+        'auth-token': token,
+        maxResults: String(PAGE_SIZE),
+        startAt: String(startAt),
+      });
+
+      let response: any;
+      try {
+        response = await axios.get(`${baseUrl}/rest/api/1/timeline?${params.toString()}`);
+      } catch (err: any) {
+        logger.warn('AT Termíny — team přeskočen', { teamId, status: err?.response?.status });
+        break;
+      }
+
+      const raw = response.data;
+      const members: any[] = raw?.members ?? [];
+      const hasMore: boolean = raw?.hasMore ?? false;
+      const total: number | undefined = raw?.total;
+
+      for (const member of members) {
+        const accountId: string = member.username ?? '';
+        const username: string = member.userRealName ?? member.username ?? '';
+
+        for (const issue of member.issues ?? []) {
+          const issueType: string = issue.issueType ?? '';
+          const summary: string = issue.summary ?? '';
+          if (issueType !== 'BOOKING' || !isTerminBooking(summary)) continue;
+
+          const id = String(issue.id ?? issue.issueKey ?? '');
+          if (seen.has(id)) continue;
+          seen.add(id);
+
+          const hoursPerDay = issue.dailyTimeEstimate != null
+            ? issue.dailyTimeEstimate / 3600
+            : 8;
+
+          const startDate = issue.plannedStart ?? issue.start ?? issue.startDate ?? '';
+          const endDate = issue.plannedEnd ?? issue.end ?? issue.endDate ?? startDate;
+          if (!startDate) continue;
+
+          const cur = new Date(startDate + 'T00:00:00Z');
+          const endDt = new Date(endDate + 'T00:00:00Z');
+          let dayIndex = 0;
+
+          const tags = parseTerminTags(summary);
+          while (cur <= endDt) {
+            const date = cur.toISOString().slice(0, 10);
+            if (date >= from && date <= to) {
+              result.push({
+                worklogId: `AT-${id}-${dayIndex}`,
+                user: username,
+                accountId,
+                summary: tags.summary,
+                parentKey: tags.parentKey,
+                parentSummary: tags.parentSummary,
+                parentIssueType: '',
+                components: tags.components,
+                sprint: tags.sprint,
+                comment: tags.comment,
+                seconds: Math.round(hoursPerDay * 3600),
+                started: `${date}T08:00:00.000+0000`,
+                issueKey: tags.issueKey || `AT-${id}`,
+                date,
+                issueType: 'TERMIN',
+                priority: '',
+                source: 'activity_timeline',
+              });
+            }
+            dayIndex++;
+            cur.setUTCDate(cur.getUTCDate() + 1);
+          }
+        }
+      }
+
+      const fetched = startAt + members.length;
+      if (members.length === 0 || (!hasMore && (total === undefined || fetched >= total))) break;
+      startAt += PAGE_SIZE;
+      page++;
+      if (page >= 50) break;
+    }
+  }
+
+  logger.info('AT Termíny načteny', { total: result.length, from, to });
+  return result;
+}

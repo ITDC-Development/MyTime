@@ -55,6 +55,11 @@ export function useWorklogs({ accountIds, year, month }: Args) {
     const byUser: Record<string, SourceWorklog[]> = {};
     for (const r of raw) {
       const e = edited[r.worklogId];
+      // Pro TERMIN záznamy starého syncu byl comment = celý AT title (začíná '[').
+      // Takový comment ignorujeme — platný comment přichází pouze z [Komentar:] tagu nebo z editace.
+      const rawComment = (r.issueType === 'TERMIN' && r.comment.startsWith('['))
+        ? ''
+        : r.comment;
       const merged: SourceWorklog = {
         worklogId: r.worklogId,
         accountId: r.accountId,
@@ -69,7 +74,7 @@ export function useWorklogs({ accountIds, year, month }: Args) {
         parentIssueType: r.parentIssueType ?? '',
         components: e?.components ?? r.components,
         sprint: e?.sprint ?? r.sprint,
-        comment: e?.comment ?? r.comment,
+        comment: e?.comment ?? rawComment,
         isEdited: Boolean(e),
         isManual: false,
         issueType: r.issueType ?? '',

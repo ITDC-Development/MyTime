@@ -1,6 +1,6 @@
 import { db } from './firestoreClient';
 import { fetchJiraWorklogs, splitIntoMonths } from './jiraClient';
-import { fetchAbsences, fetchMemberRoles, type MemberRole } from './activityTimelineClient';
+import { fetchAbsences, fetchMemberRoles, fetchTerminEvents, type MemberRole } from './activityTimelineClient';
 import { isLocked } from './lockService';
 import { logger } from '../utils/logger';
 import type { RawWorklog, Absence } from '../types/worklog';
@@ -172,6 +172,37 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     logger.error('Activity Timeline selhalo', { atError, from: opts.from, to: opts.to });
   }
 
+  // Termíny z Activity Timeline → worklogs_raw
+  let terminWritten = 0;
+  let terminSkipped = 0;
+  try {
+    const terminEvents = await fetchTerminEvents(opts.from, opts.to);
+    const terminDocs: { ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
+
+    for (const t of terminEvents) {
+      const d = new Date(t.date);
+      const year = d.getUTCFullYear();
+      const month = d.getUTCMonth() + 1;
+
+      if (await isLocked(year, month, t.accountId)) {
+        terminSkipped++;
+        continue;
+      }
+
+      // Termíny vždy přepisujeme — datum/čas se v AT může měnit
+      const ref = db().collection('worklogs_raw').doc(t.worklogId);
+      terminDocs.push({ ref, data: t });
+    }
+
+    terminWritten = await commitInChunks(terminDocs);
+    if (opts.mode === 'override' && terminDocs.length > 0) {
+      await deleteEditedWorklogs(terminDocs.map(d => d.data.worklogId));
+    }
+    logger.info('Termíny zapsány', { written: terminWritten, skipped: terminSkipped });
+  } catch (err: any) {
+    logger.warn('Sync termínů selhal (nekritická chyba)', { err: String(err) });
+  }
+
   // Sync členů a rolí z AT (nekritická — chyba neblokuje výsledek syncu)
   let rolesUpdated = 0;
   try {
@@ -217,6 +248,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     worklogsWritten: totalWritten,
     worklogsSkipped: totalSkipped,
     absencesWritten: absWritten,
+    terminWritten,
     rolesUpdated,
     range: { from: opts.from, to: opts.to },
     mode: opts.mode,

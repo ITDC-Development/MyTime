@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Checkbox, Autocomplete, TextField, Chip } from '@mui/material';
+import { useState, useMemo, useRef } from 'react';
+import { Box, Typography, Paper, Stack, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button, FormControlLabel, Checkbox, Autocomplete, TextField, Chip, RadioGroup, Radio, Divider } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useUsers } from '../hooks/useUsers';
 import { useMembers } from '../hooks/useMembers';
@@ -16,7 +16,10 @@ import { WorklogTable } from '../components/reports/WorklogTable';
 import { ExportButtons } from '../components/export/ExportButtons';
 import { ExportPresetManager } from '../components/export/ExportPresetManager';
 import { setLocks } from '../services/firestore/locks';
-import { ColumnId } from '../types/export';
+import { exportCsv } from '../services/exporters/csvExporter';
+import { exportXlsx } from '../services/exporters/xlsxExporter';
+import { exportPdf } from '../services/exporters/pdfExporter';
+import { ColumnId, ExportFormat, ExportLang, EXPORT_COLUMN_LABELS, EXPORT_FILENAME_PREFIX } from '../types/export';
 import type { ExportPreset } from '../types/user';
 import dayjs from 'dayjs';
 
@@ -67,16 +70,19 @@ export function OverviewPage() {
     return filtered.filter(r => r.components.some(c => selectedComponents.includes(c)));
   }, [filtered, selectedComponents]);
 
-  const rowsForExport = useMemo(() =>
+  const title = `Výkaz · ${monthLabel(year, month)}`;
+
+  const buildExportRows = (lang: ExportLang) =>
     displayedRows.map(r => {
       const obj: Record<string, unknown> = {};
       for (const c of columns) {
-        obj[labelOf(c)] = renderForExport(r, c);
+        obj[EXPORT_COLUMN_LABELS[lang][c]] = renderForExport(r, c);
       }
       return obj;
-    }), [displayedRows, columns]);
+    });
 
-  const filename = useMemo(() => {
+  const buildExportFilename = (lang: ExportLang) => {
+    const prefix = EXPORT_FILENAME_PREFIX[lang];
     const mm = String(month).padStart(2, '0');
     const yy = String(year).slice(-2);
     if (selected.length === 1) {
@@ -85,32 +91,17 @@ export function OverviewPage() {
     }
     if (selected.length > 1) {
       const name = filtered.find(r => !r.isPause)?.user ?? '';
-      const prefix = name ? sanitizeName(name) : 'vykaz';
-      return `${prefix}_a_dalsi_${mm}_${yy}`;
+      const userPart = name ? sanitizeName(name) : prefix;
+      return `${userPart}_a_dalsi_${mm}_${yy}`;
     }
-    return `vykaz_${year}-${mm}`;
-  }, [filtered, selected, year, month]);
-  const title = `Výkaz · ${monthLabel(year, month)}`;
-
-  const onBeforeExport = async () => {
-    if (!profile || selected.length === 0) return;
-    setPending(() => async () => {
-      await setLocks(year, month, selected, profile.uid);
-    });
-    return new Promise<void>(resolve => {
-      // dialog se otevře, po potvrzení uzamkne a resolve
-      setPending(() => async () => { await setLocks(year, month, selected, profile.uid); resolve(); });
-    });
+    return `${prefix}_${year}-${mm}`;
   };
 
-  // Jednoduší přístup: uzamkneme rovnou při exportu po potvrzení
-  const exportWithLock = async () => {
-    if (!profile) return;
-    await setLocks(year, month, selected, profile.uid);
-  };
-
-  const [confirmExport, setConfirmExport] = useState<null | (() => void)>(null);
+  const [confirmExport, setConfirmExport] = useState(false);
   const [lockOnExport, setLockOnExport] = useState(true);
+  const [exportLang, setExportLang] = useState<ExportLang>('cs');
+  const pendingFormatRef = useRef<ExportFormat | null>(null);
+  const pendingResolveRef = useRef<((handled: boolean) => void) | null>(null);
 
   const presets: ExportPreset[] = preferences?.exportPresets ?? [];
 
@@ -187,9 +178,11 @@ export function OverviewPage() {
                 Vybráno {selected.length} {selected.length === 1 ? 'zaměstnanec' : 'zaměstnanců'} · {displayedRows.filter(r => !r.isPause).length} worklogů
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center">
-                <ExportButtons rows={rowsForExport} filename={filename} title={title} onExport={async () => {
-                  return new Promise<void>(resolve => {
-                    setConfirmExport(() => () => { resolve(); });
+                <ExportButtons rows={[]} filename="" title={title} onExport={async (format) => {
+                  return new Promise<boolean>(resolve => {
+                    pendingFormatRef.current = format;
+                    pendingResolveRef.current = resolve;
+                    setConfirmExport(true);
                   });
                 }} />
               </Stack>
@@ -198,12 +191,27 @@ export function OverviewPage() {
         )}
       </Paper>
 
-      <Dialog open={Boolean(confirmExport)} onClose={() => setConfirmExport(null)}>
+      <Dialog open={confirmExport} onClose={() => {
+        pendingResolveRef.current?.(true);
+        pendingResolveRef.current = null;
+        pendingFormatRef.current = null;
+        setConfirmExport(false);
+      }}>
         <DialogTitle>Potvrzení exportu</DialogTitle>
         <DialogContent>
           <Typography sx={{ mb: 2 }}>
             Exportujete výkaz za <strong>{monthLabel(year, month)}</strong> pro {selected.length} {selected.length === 1 ? 'zaměstnance' : 'zaměstnanců'}.
           </Typography>
+
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>Jazyk exportu</Typography>
+          <RadioGroup row value={exportLang} onChange={e => setExportLang(e.target.value as ExportLang)}>
+            <FormControlLabel value="cs" control={<Radio size="small" />} label="Čeština" />
+            <FormControlLabel value="de" control={<Radio size="small" />} label="Němčina" />
+            <FormControlLabel value="en" control={<Radio size="small" />} label="English" />
+          </RadioGroup>
+
+          <Divider sx={{ my: 2 }} />
+
           <FormControlLabel
             control={<Checkbox checked={lockOnExport} onChange={e => setLockOnExport(e.target.checked)} />}
             label={<>Zamknout období <strong>{monthLabel(year, month)}</strong> po exportu</>}
@@ -215,11 +223,27 @@ export function OverviewPage() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setConfirmExport(null)}>Zrušit</Button>
+          <Button onClick={() => {
+            pendingResolveRef.current?.(true);
+            pendingResolveRef.current = null;
+            pendingFormatRef.current = null;
+            setConfirmExport(false);
+          }}>Zrušit</Button>
           <Button variant="contained" onClick={async () => {
-            if (lockOnExport) await exportWithLock();
-            confirmExport && confirmExport();
-            setConfirmExport(null);
+            if (lockOnExport && selected.length > 0 && profile) {
+              await setLocks(year, month, selected, profile.uid);
+            }
+            const lang = exportLang;
+            const format = pendingFormatRef.current;
+            const rows = buildExportRows(lang);
+            const fname = buildExportFilename(lang);
+            if (format === 'xlsx') await exportXlsx(rows, fname);
+            else if (format === 'csv') exportCsv(rows, fname);
+            else if (format === 'pdf') exportPdf(rows, fname, title);
+            pendingResolveRef.current?.(true);
+            pendingResolveRef.current = null;
+            pendingFormatRef.current = null;
+            setConfirmExport(false);
           }}>
             Exportovat
           </Button>
@@ -227,12 +251,6 @@ export function OverviewPage() {
       </Dialog>
     </Box>
   );
-}
-
-function labelOf(c: ColumnId): string {
-  return { user: 'Uživatel', date: 'Datum', from: 'Od', to: 'Do', issue: 'Issue', name: 'Název',
-    parentKey: 'Parent - klíč', parentName: 'Parent - název',
-    sprint: 'Sprint', component: 'Komponenta', hours: 'Hodiny', comment: 'Komentář', overtime: 'Přesčas' }[c];
 }
 
 function sanitizeName(name: string): string {

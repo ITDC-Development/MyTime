@@ -8,6 +8,13 @@ import sync from './routes/sync';
 import users from './routes/users';
 import smartReports from './routes/smartReports';
 
+const REQUIRED_ENV = ['GOOGLE_CLOUD_PROJECT'];
+const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missing.length) {
+  console.error(`FATAL: Chybí povinné env proměnné: ${missing.join(', ')}. Backend se nespustí.`);
+  process.exit(1);
+}
+
 const app = express();
 app.disable('x-powered-by');
 

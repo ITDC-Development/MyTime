@@ -12,6 +12,7 @@ build/
 .env
 .env.local
 env-prod.yaml
+env-prod-plain.yaml
 
 # Logy
 *.log

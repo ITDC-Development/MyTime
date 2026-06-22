@@ -75,6 +75,7 @@ export function CompanyReportPage() {
   const [isBulkExporting, setIsBulkExporting] = useState(false);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
+  const [draftLink, setDraftLink] = useState<string | null>(null);
 
   const handleDeleteEdit = async (worklog: LinearWorklog) => {
     if (!profile) return;
@@ -352,6 +353,7 @@ export function CompanyReportPage() {
   const handleSendEmail = async () => {
     setIsSendingEmail(true);
     setEmailError(null);
+    setDraftLink(null);
     try {
       const mm = String(month).padStart(2, '0');
       const subject = `Docházka – ${monthLabel(year, month)}`;
@@ -446,8 +448,8 @@ export function CompanyReportPage() {
         );
       }
 
-      const draftLink = await createOutlookDraft(subject, body, attachments);
-      window.open(draftLink, '_blank');
+      const link = await createOutlookDraft(subject, body, attachments);
+      setDraftLink(link);
     } catch (err: any) {
       setEmailError(err?.message ?? String(err));
     } finally {
@@ -536,6 +538,18 @@ export function CompanyReportPage() {
                 </Button>
               )}
               {emailError && <Alert severity="error" sx={{ mt: 1 }}>{emailError}</Alert>}
+              {draftLink && (
+                <Button
+                  size="small"
+                  variant="contained"
+                  color="success"
+                  href={draftLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Otevřít koncept v Outlooku
+                </Button>
+              )}
             </Stack>
             <WorklogTable
               rows={combinedRows}

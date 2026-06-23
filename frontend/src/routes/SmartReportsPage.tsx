@@ -126,7 +126,10 @@ export function SmartReportsPage() {
       const raw = rawSnap.docs.map(d => d.data() as RawWorklog);
 
       // Načti úpravy a sestav mapu
-      const editedSnap = await getDocs(collection(firestore, 'worklogs_edited'));
+      const editedQ = accountFilter === null
+        ? collection(firestore, 'worklogs_edited')
+        : query(collection(firestore, 'worklogs_edited'), where('accountId', '==', accountFilter));
+      const editedSnap = await getDocs(editedQ);
       const editedMap: Record<string, EditedWorklog> = {};
       editedSnap.docs.forEach(d => { editedMap[d.id] = d.data() as EditedWorklog; });
 

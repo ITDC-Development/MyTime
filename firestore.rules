@@ -35,8 +35,10 @@ service cloud.firestore {
     }
 
     // Pozvánky – admin vytváří (jen povolené domény), pozvaný uživatel může přečíst a označit jako použitou
+    // Read je veřejný — token je crypto.randomUUID() (prakticky uhodnutelný), nepřihlášený uživatel
+    // potřebuje ověřit pozvánku ještě před vytvořením účtu
     match /invites/{token} {
-      allow read: if isAuthenticated();
+      allow read: if true;
       allow create: if isAdmin() && isAllowedDomain(request.resource.data.email);
       // Pouze příjemce pozvánky může změnit pole `used` na true
       allow update: if isAuthenticated() &&

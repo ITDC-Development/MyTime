@@ -3,6 +3,8 @@ import { Box, Typography, Paper, Stack, Grid, Card, CardContent, Alert, Button, 
 import { PictureAsPdf, Email } from '@mui/icons-material';
 import { exportPdf, exportPdfBulk, generatePdfBase64, generatePdfSectionsAsFiles, type PdfSummaryItem, type PdfSection } from '../services/exporters/pdfExporter';
 import { createOutlookDraft } from '../services/graphMailService';
+import { acquireMailToken } from '../services/msalClient';
+import JSZip from 'jszip';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -355,6 +357,10 @@ export function CompanyReportPage() {
     setEmailError(null);
     setDraftLink(null);
     try {
+      // Acquire token immediately on click — popup must open close to user gesture,
+      // not after async PDF generation which can block browser popup policy.
+      const mailToken = await acquireMailToken();
+
       const mm = String(month).padStart(2, '0');
       const subject = `Docházka – ${monthLabel(year, month)}`;
       const body = `<p>V příloze naleznete docházku za <strong>${monthLabel(year, month)}</strong>.</p>`;
@@ -441,15 +447,28 @@ export function CompanyReportPage() {
         }
 
         const titlePrefix = `Docházka – ${monthLabel(year, month)}`;
-        attachments = await generatePdfSectionsAsFiles(
+        const pdfs = await generatePdfSectionsAsFiles(
           sections,
           name => `dochazka-${sanitizeName(name)}-${year}-${mm}.pdf`,
           titlePrefix,
         );
+
+        // Pack all PDFs into a single ZIP to stay within Exchange message size limits
+        const zip = new JSZip();
+        for (const pdf of pdfs) {
+          zip.file(pdf.name, pdf.contentBase64, { base64: true });
+        }
+        const zipBase64 = await zip.generateAsync({ type: 'base64', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+        attachments = [{ name: `dochazka-${year}-${mm}.zip`, contentBase64: zipBase64 }];
       }
 
-      const link = await createOutlookDraft(subject, body, attachments);
-      setDraftLink(link);
+      const link = await createOutlookDraft(subject, body, attachments, mailToken);
+      const pw = 950, ph = 720;
+      const left = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+      const top = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+      const popup = window.open(link, 'outlook_draft', `width=${pw},height=${ph},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+      // Fallback: if browser blocked the popup, show a button
+      setDraftLink(popup ? null : link);
     } catch (err: any) {
       setEmailError(err?.message ?? String(err));
     } finally {
@@ -543,9 +562,12 @@ export function CompanyReportPage() {
                   size="small"
                   variant="contained"
                   color="success"
-                  href={draftLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  onClick={() => {
+                    const pw = 950, ph = 720;
+                    const left = Math.round(window.screenX + (window.outerWidth - pw) / 2);
+                    const top = Math.round(window.screenY + (window.outerHeight - ph) / 2);
+                    window.open(draftLink, 'outlook_draft', `width=${pw},height=${ph},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+                  }}
                 >
                   Otevřít koncept v Outlooku
                 </Button>

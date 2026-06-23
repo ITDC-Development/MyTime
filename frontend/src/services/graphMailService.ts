@@ -5,32 +5,60 @@ interface Attachment {
   contentBase64: string; // base64 PDF
 }
 
-export async function createOutlookDraft(subject: string, bodyHtml: string, attachments: Attachment[]): Promise<string> {
-  const token = await acquireMailToken();
+const GRAPH = 'https://graph.microsoft.com/v1.0';
+const CHUNK_SIZE = 320 * 1024 * 20; // 6.25 MB — must be a multiple of 320 KB per Graph API spec
 
-  const payload = {
-    subject,
-    body: { contentType: 'HTML', content: bodyHtml },
-    attachments: attachments.map(a => ({
-      '@odata.type': '#microsoft.graph.fileAttachment',
-      name: a.name,
-      contentType: 'application/pdf',
-      contentBytes: a.contentBase64,
-    })),
-  };
+async function uploadAttachment(messageId: string, token: string, attachment: Attachment): Promise<void> {
+  const binary = atob(attachment.contentBase64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  const fileSize = bytes.length;
 
-  const res = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
+  const sessionRes = await fetch(`${GRAPH}/me/messages/${messageId}/attachments/createUploadSession`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      AttachmentItem: { attachmentType: 'file', name: attachment.name, size: fileSize },
+    }),
   });
+  if (!sessionRes.ok) throw new Error(`Upload session error ${sessionRes.status}: ${await sessionRes.text()}`);
+  const { uploadUrl } = await sessionRes.json();
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Graph API error ${res.status}: ${err}`);
+  let offset = 0;
+  while (offset < fileSize) {
+    const chunk = bytes.slice(offset, Math.min(offset + CHUNK_SIZE, fileSize));
+    const end = offset + chunk.length - 1;
+    const putRes = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Range': `bytes ${offset}-${end}/${fileSize}`,
+      },
+      body: chunk,
+    });
+    if (!putRes.ok && putRes.status !== 201) {
+      throw new Error(`Chunk upload failed at ${offset}: ${putRes.status} — ${await putRes.text()}`);
+    }
+    offset += chunk.length;
   }
+}
+
+export async function createOutlookDraft(subject: string, bodyHtml: string, attachments: Attachment[], preToken?: string): Promise<string> {
+  const token = preToken ?? await acquireMailToken();
+
+  // Create draft without attachments to avoid payload size limits
+  const res = await fetch(`${GRAPH}/me/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject, body: { contentType: 'HTML', content: bodyHtml } }),
+  });
+  if (!res.ok) throw new Error(`Graph API error ${res.status}: ${await res.text()}`);
 
   const draft = await res.json();
-  // webLink opens the draft directly in Outlook Web
+
+  // Upload each PDF via upload session (supports large files)
+  for (const attachment of attachments) {
+    await uploadAttachment(draft.id as string, token, attachment);
+  }
+
   return draft.webLink as string;
 }

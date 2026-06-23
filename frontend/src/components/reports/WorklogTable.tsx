@@ -40,7 +40,6 @@ export function WorklogTable({ rows, columns, isLocked, showOvertime = false, on
           const bg = row.isAbsence && row.absenceType === 'SICK_LEAVE' ? 'rgba(76,175,80,0.15)'
             : row.isAbsence ? 'rgba(33,150,243,0.13)'
             : row.isPause ? BRAND.cream
-            : row.issueType === 'TERMIN' ? 'rgba(156,39,176,0.08)'
             : (showOvertime && row.isOvertime) ? 'rgba(186,117,23,0.10)'
             : row.isEdited ? 'rgba(139,170,69,0.06)' : 'inherit';
           return (

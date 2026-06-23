@@ -27,10 +27,15 @@ export function RegisterPage() {
       setInviteError('Neplatný odkaz. Požádej administrátora o novou pozvánku.');
       return;
     }
-    validateInvite(inviteToken, inviteEmail).then(({ valid, reason }) => {
-      setInviteValid(valid);
-      if (!valid) setInviteError(reason ?? 'Neplatná pozvánka.');
-    });
+    validateInvite(inviteToken, inviteEmail)
+      .then(({ valid, reason }) => {
+        setInviteValid(valid);
+        if (!valid) setInviteError(reason ?? 'Neplatná pozvánka.');
+      })
+      .catch(() => {
+        setInviteValid(false);
+        setInviteError('Nepodařilo se ověřit pozvánku. Zkus to znovu nebo požádej administrátora.');
+      });
   }, [inviteToken, inviteEmail]);
 
   const submit = async (e: React.FormEvent) => {

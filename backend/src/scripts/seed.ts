@@ -3,6 +3,11 @@ import { db, authAdmin } from '../services/firestoreClient';
 import { syncWorklogs } from '../services/worklogService';
 import { logger } from '../utils/logger';
 
+if (!process.env.FIRESTORE_EMULATOR_HOST) {
+  console.error('Seed skript lze spustit pouze s Firebase emulátorem (FIRESTORE_EMULATOR_HOST není nastaven).');
+  process.exit(1);
+}
+
 interface SeedUser {
   email: string;
   password: string;

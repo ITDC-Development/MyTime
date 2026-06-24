@@ -1,7 +1,7 @@
 import { Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Box, Avatar, Typography, Divider, Badge } from '@mui/material';
 import {
   CloudDownload, FolderSpecial, Business, Assessment,
-  History as HistoryIcon, Person, ManageAccounts, Logout, AccessTime, HelpOutline, AutoAwesome,
+  History as HistoryIcon, Person, ManageAccounts, Logout, AccessTime, HelpOutline, AutoAwesome, Label,
 } from '@mui/icons-material';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -15,6 +15,7 @@ const ADMIN_MENU: MenuItem[] = [
   { path: '/project', label: 'Projektový výkaz', icon: <FolderSpecial /> },
   { path: '/company', label: 'Docházka', icon: <Business /> },
   { path: '/overview', label: 'Přehledy', icon: <Assessment /> },
+  { path: '/admin/tag-definitions', label: 'Definovat tagy', icon: <Label /> },
   { path: '/smart-reports', label: 'Chytré přehledy', icon: <AutoAwesome /> },
   { path: '/history', label: 'Historie změn', icon: <HistoryIcon /> },
   { path: '/employee', label: 'Přehled zaměstnance', icon: <Person /> },

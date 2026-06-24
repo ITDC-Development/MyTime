@@ -71,6 +71,15 @@ router.patch('/:uid', authenticate, requireAdmin, async (req: AuthedRequest, res
     }
   }
 
+  const VALID_ROLES = ['admin', 'user', 'freelancer'];
+  const VALID_STATUSES = ['active', 'pending', 'blocked'];
+  if (updates.role && !VALID_ROLES.includes(updates.role)) {
+    return res.status(400).json({ error: 'Neplatná role.' });
+  }
+  if (updates.status && !VALID_STATUSES.includes(updates.status)) {
+    return res.status(400).json({ error: 'Neplatný status.' });
+  }
+
   const cleaned: Record<string, unknown> = {};
   if (updates.role) cleaned.role = updates.role;
   if (updates.status) cleaned.status = updates.status;

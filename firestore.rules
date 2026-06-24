@@ -55,7 +55,8 @@ service cloud.firestore {
       // Vytvoření jen sobě, jen povolená doména, role musí být 'user', status musí být 'pending'
       allow create: if isSelf(userId) &&
                        isAllowedDomain(request.resource.data.email) &&
-                       request.resource.data.role == 'user';
+                       request.resource.data.role == 'user' &&
+                       request.resource.data.status == 'pending';
       // Self-update of preferences only; admin can update role/status
       allow update: if
         (isSelf(userId) &&
@@ -112,6 +113,12 @@ service cloud.firestore {
 
     // Members (AT directory): readable by all active users, writable only by backend
     match /members/{memberId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    // Tag definitions: readable by active users, writable by admin
+    match /tag_definitions/{tagId} {
       allow read: if isActiveUser();
       allow write: if isAdmin();
     }

@@ -118,6 +118,13 @@ export function SmartReportsPage() {
     try {
       const accountFilter = isAdmin ? null : ownAccountId ?? '';
 
+      if (!isAdmin && accountFilter === '') {
+        setRawWorklogs([]);
+        setDataLoaded(true);
+        setLoadingData(false);
+        return;
+      }
+
       // Načti raw worklogy
       const rawQ = accountFilter === null
         ? query(collection(firestore, 'worklogs_raw'), where('date', '>=', dateFrom), where('date', '<=', dateTo))

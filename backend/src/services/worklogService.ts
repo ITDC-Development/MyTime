@@ -1,6 +1,6 @@
 import { db } from './firestoreClient';
 import { fetchJiraWorklogs, splitIntoMonths } from './jiraClient';
-import { fetchAbsences, fetchMemberRoles, fetchTerminEvents, type MemberRole } from './activityTimelineClient';
+import { fetchAbsences, fetchMemberRoles, fetchTerminEvents, type MemberRole, type CustomTagMapping } from './activityTimelineClient';
 import { isLocked } from './lockService';
 import { logger } from '../utils/logger';
 import type { RawWorklog, Absence } from '../types/worklog';
@@ -176,7 +176,12 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
   let terminWritten = 0;
   let terminSkipped = 0;
   try {
-    const terminEvents = await fetchTerminEvents(opts.from, opts.to);
+    const tagDefsSnap = await db().collection('tag_definitions').get();
+    const customMappings: CustomTagMapping[] = tagDefsSnap.docs.map(d => ({
+      tagName: d.data().tagName as string,
+      column: d.data().column as CustomTagMapping['column'],
+    }));
+    const terminEvents = await fetchTerminEvents(opts.from, opts.to, customMappings);
     const terminDocs: { ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
 
     for (const t of terminEvents) {

@@ -1,5 +1,5 @@
 import { Box, Typography, Paper, Accordion, AccordionSummary, AccordionDetails, Divider, Chip } from '@mui/material';
-import { ExpandMore, CloudDownload, FolderSpecial, Business, Assessment, History, Person, ManageAccounts, AutoAwesome, LightbulbOutlined } from '@mui/icons-material';
+import { ExpandMore, CloudDownload, FolderSpecial, Business, Assessment, History, Person, ManageAccounts, AutoAwesome, LightbulbOutlined, Label } from '@mui/icons-material';
 import { BRAND } from '../theme';
 
 interface Section {
@@ -82,6 +82,26 @@ const SECTIONS: Section[] = [
       'Mzdová účtárna: nastav šablonu s požadovanými sloupci (Datum, Uživatel, Hodiny, Přesčas), ulož ji jako „Mzdy" a příště ji jednoduše načti.',
       'Porovnání týmu: vyber všechny zaměstnance a exportuj do Excelu pro vlastní zpracování.',
       'Export bez zamčení: v potvrzovacím dialogu zruš zaškrtnutí „Zamknout období" — worklogy zůstanou editovatelné.',
+    ],
+  },
+  {
+    icon: <Label />,
+    title: 'Definovat tagy',
+    role: 'Admin',
+    description: 'Vlastní mapování tagů z Activity Timeline termínů na datová pole worklogu. Termíny v AT mohou obsahovat libovolně pojmenované tagy ve formátu [NázevTagu: hodnota] — tato stránka určuje, do kterého sloupce se daná hodnota uloží.',
+    steps: [
+      'Na stránce je seznam všech nadefinovaných tagů s názvem a cílovým sloupcem.',
+      'Klikni „Přidat nový tag" — otevře se modal se dvěma poli.',
+      'Název tagu: zadej přesný název tagu tak, jak se vyskytuje v AT, bez závorek (např. ParentEpic). Rozlišení malých a velkých písmen není vyžadováno.',
+      'Mapování na sloupec: vyber z rozbalovacího seznamu cílové pole (Issue klíč, Parent-klíč, Parent-název, Komponenta, Sprint, Komentář, Název).',
+      'Klikni „Uložit" — definice je okamžitě aktivní a použije se při příštím syncu.',
+      'Smazání tagu: klikni na ikonu košíku na konci řádku. Změna se projeví při dalším syncu.',
+      'Vestavěné tagy (Issue, Parent-klic, Komponenta, Sprint atd.) mají vždy přednost. Vlastní tag doplní hodnotu pouze tehdy, pokud ji vestavěný tag ještě nevyplnil.',
+    ],
+    examples: [
+      'Nestandardní název v AT: tým pojmenoval tag pro rodičovský epic „ParentEpic" místo standardního „Parent-klic" — přidej mapování ParentEpic → Parent-klíč a hodnota se při syncu správně uloží.',
+      'Více tagů na stejný sloupec: lze nadefinovat více názvů pro stejný sloupec — při syncu se použije první nalezená hodnota.',
+      'Komponenta ze speciálního tagu: AT záznam obsahuje [Modul: Platební brána] — namapuj Modul → Komponenta a hodnota se přidá k ostatním komponentám worklogu.',
     ],
   },
   {

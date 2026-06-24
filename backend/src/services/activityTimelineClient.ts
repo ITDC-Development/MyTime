@@ -337,7 +337,12 @@ function isTerminBooking(summary: string): boolean {
   return key === 'termín' || key === 'termin';
 }
 
-function parseTerminTags(summary: string): {
+export interface CustomTagMapping {
+  tagName: string;
+  column: 'issueKey' | 'parentKey' | 'parentSummary' | 'components' | 'sprint' | 'comment' | 'summary';
+}
+
+function parseTerminTags(summary: string, customMappings: CustomTagMapping[] = []): {
   issueKey: string;
   parentKey: string;
   parentSummary: string;
@@ -352,15 +357,29 @@ function parseTerminTags(summary: string): {
   while ((m = pattern.exec(summary)) !== null) {
     tags[m[1].trim().toLowerCase()] = m[2].trim();
   }
-  return {
+  const textOutsideBrackets = summary.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+
+  const result = {
     issueKey:      tags['issue'] ?? '',
     parentKey:     tags['parent-klic'] ?? tags['parent-klíč'] ?? '',
     parentSummary: tags['parent-nazev'] ?? tags['parent-název'] ?? '',
     components:    tags['komponenta'] ? [tags['komponenta']] : [],
     sprint:        tags['sprint'] ?? '',
     comment:       tags['komentar'] ?? tags['komentář'] ?? '',
-    summary:       tags['nazev'] ?? tags['název'] ?? '',
+    summary:       textOutsideBrackets || tags['nazev'] || tags['název'] || '',
   };
+
+  for (const mapping of customMappings) {
+    const val = tags[mapping.tagName.toLowerCase()];
+    if (!val) continue;
+    if (mapping.column === 'components') {
+      if (!result.components.includes(val)) result.components = [...result.components, val];
+    } else {
+      result[mapping.column] = result[mapping.column] || val;
+    }
+  }
+
+  return result;
 }
 
 export interface AtWorklogEntry {
@@ -383,7 +402,7 @@ export interface AtWorklogEntry {
   source: 'activity_timeline';
 }
 
-export async function fetchTerminEvents(from: string, to: string): Promise<AtWorklogEntry[]> {
+export async function fetchTerminEvents(from: string, to: string, customMappings: CustomTagMapping[] = []): Promise<AtWorklogEntry[]> {
   if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) return [];
 
   const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
@@ -444,7 +463,7 @@ export async function fetchTerminEvents(from: string, to: string): Promise<AtWor
           const endDt = new Date(endDate + 'T00:00:00Z');
           let dayIndex = 0;
 
-          const tags = parseTerminTags(summary);
+          const tags = parseTerminTags(summary, customMappings);
           while (cur <= endDt) {
             const date = cur.toISOString().slice(0, 10);
             if (date >= from && date <= to) {

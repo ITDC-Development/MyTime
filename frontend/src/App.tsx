@@ -13,6 +13,7 @@ import { EmployeeSummaryPage } from './routes/EmployeeSummaryPage';
 import { UsersAdminPage } from './routes/UsersAdminPage';
 import { HelpPage } from './routes/HelpPage';
 import { SmartReportsPage } from './routes/SmartReportsPage';
+import { TagDefinitionsPage } from './routes/TagDefinitionsPage';
 import { useAuth } from './contexts/AuthContext';
 
 function RootRedirect() {
@@ -40,6 +41,7 @@ export default function App() {
           <Route path="/employee" element={<ProtectedRoute allowedRoles={['admin', 'user']}><AppLayout><EmployeeSummaryPage /></AppLayout></ProtectedRoute>} />
           <Route path="/admin/users" element={<ProtectedRoute requireAdmin><AppLayout><UsersAdminPage /></AppLayout></ProtectedRoute>} />
           <Route path="/smart-reports" element={<ProtectedRoute><AppLayout><SmartReportsPage /></AppLayout></ProtectedRoute>} />
+          <Route path="/admin/tag-definitions" element={<ProtectedRoute requireAdmin><AppLayout><TagDefinitionsPage /></AppLayout></ProtectedRoute>} />
           <Route path="/napoveda" element={<ProtectedRoute requireAdmin><AppLayout><HelpPage /></AppLayout></ProtectedRoute>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />

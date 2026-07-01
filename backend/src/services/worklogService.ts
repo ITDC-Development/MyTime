@@ -1,6 +1,6 @@
 import { db } from './firestoreClient';
 import { fetchJiraWorklogs, splitIntoMonths } from './jiraClient';
-import { fetchAbsences, fetchMemberRoles, fetchTerminEvents, type MemberRole, type CustomTagMapping } from './activityTimelineClient';
+import { fetchAbsences, fetchMemberRoles, fetchTerminEvents, fetchDoctorVisitEvents, type MemberRole, type CustomTagMapping } from './activityTimelineClient';
 import { isLocked } from './lockService';
 import { logger } from '../utils/logger';
 import type { RawWorklog, Absence } from '../types/worklog';
@@ -32,6 +32,86 @@ async function deleteEditedWorklogs(worklogIds: string[]): Promise<void> {
   }
 }
 
+// Smaže z worklogs_raw dokumenty, jejichž zdroj (Jira worklog / AT Termín / AT Lékař) v aktuálním
+// syncu už neexistuje — tj. byl v Jira/Activity Timeline mezitím smazán nebo změněn.
+// Kategorie, jejichž fetch v tomto běhu selhal, se do `categories` nepředávají, takže jejich
+// dokumenty zůstanou nedotčené (jinak by prázdná množina validIds znamenala smazání všeho).
+async function reconcileWorklogsRaw(
+  from: string,
+  to: string,
+  categories: { name: string; predicate: (data: any) => boolean; validIds: Set<string> }[]
+): Promise<{ deleted: number; skippedLocked: number; byCategory: Record<string, number> }> {
+  if (categories.length === 0) return { deleted: 0, skippedLocked: 0, byCategory: {} };
+
+  const snap = await db().collection('worklogs_raw')
+    .where('date', '>=', from)
+    .where('date', '<=', to)
+    .get();
+
+  const toDelete: FirebaseFirestore.DocumentReference[] = [];
+  const byCategory: Record<string, number> = {};
+  let skippedLocked = 0;
+
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const category = categories.find(c => c.predicate(data));
+    if (!category || category.validIds.has(doc.id)) continue;
+
+    const d = new Date(data.date);
+    if (await isLocked(d.getUTCFullYear(), d.getUTCMonth() + 1, data.accountId)) {
+      skippedLocked++;
+      continue;
+    }
+    toDelete.push(doc.ref);
+    byCategory[category.name] = (byCategory[category.name] ?? 0) + 1;
+  }
+
+  for (let i = 0; i < toDelete.length; i += BATCH_LIMIT) {
+    const batch = db().batch();
+    for (const ref of toDelete.slice(i, i + BATCH_LIMIT)) batch.delete(ref);
+    await batch.commit();
+  }
+  if (toDelete.length > 0) {
+    await deleteEditedWorklogs(toDelete.map(r => r.id));
+  }
+
+  return { deleted: toDelete.length, skippedLocked, byCategory };
+}
+
+// Totéž pro absence — kolekce obsahuje jen absence, takže není potřeba rozlišovat kategorie.
+async function reconcileAbsences(
+  from: string,
+  to: string,
+  validIds: Set<string>
+): Promise<{ deleted: number; skippedLocked: number }> {
+  const snap = await db().collection('absences')
+    .where('date', '>=', from)
+    .where('date', '<=', to)
+    .get();
+
+  const toDelete: FirebaseFirestore.DocumentReference[] = [];
+  let skippedLocked = 0;
+
+  for (const doc of snap.docs) {
+    if (validIds.has(doc.id)) continue;
+    const data = doc.data() as Absence;
+    const d = new Date(data.date);
+    if (await isLocked(d.getUTCFullYear(), d.getUTCMonth() + 1, data.accountId)) {
+      skippedLocked++;
+      continue;
+    }
+    toDelete.push(doc.ref);
+  }
+
+  for (let i = 0; i < toDelete.length; i += BATCH_LIMIT) {
+    const batch = db().batch();
+    for (const ref of toDelete.slice(i, i + BATCH_LIMIT)) batch.delete(ref);
+    await batch.commit();
+  }
+
+  return { deleted: toDelete.length, skippedLocked };
+}
+
 export async function syncWorklogs(opts: { from: string; to: string; mode: 'incremental' | 'override' }) {
   const startTime = new Date().toISOString();
   const monthChunks = splitIntoMonths(opts.from, opts.to);
@@ -39,6 +119,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
 
   let totalWritten = 0;
   let totalSkipped = 0;
+  const allValidJiraIds = new Set<string>();
 
   for (const chunk of monthChunks) {
     logger.info('Zpracovávám chunk', chunk);
@@ -47,6 +128,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     const docs: { ref: FirebaseFirestore.DocumentReference; data: RawWorklog }[] = [];
 
     for (const w of jiraData) {
+      allValidJiraIds.add(String(w.worklogId));
       const date = dateOnly(w.started);
       const d = new Date(date);
       const year = d.getUTCFullYear();
@@ -111,8 +193,11 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
   // Absences
   let absWritten = 0;
   let atError: string | null = null;
+  let absencesFetchOk = false;
+  const validAbsenceIds = new Set<string>();
   try {
     const absences = await fetchAbsences(opts.from, opts.to, prefetchedMemberRoles);
+    absencesFetchOk = true;
     const absDocs: { ref: FirebaseFirestore.DocumentReference; data: Absence }[] = [];
 
     for (const a of absences) {
@@ -128,6 +213,7 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
       let dayIndex = 0;
       while (cur <= end) {
         const dayStr = cur.toISOString().slice(0, 10);
+        validAbsenceIds.add(`${a.id}_${dayIndex}`);
         absDocs.push({
           ref: db().collection('absences').doc(`${a.id}_${dayIndex}`),
           data: {
@@ -175,6 +261,8 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
   // Termíny z Activity Timeline → worklogs_raw
   let terminWritten = 0;
   let terminSkipped = 0;
+  let terminFetchOk = false;
+  const validTerminIds = new Set<string>();
   try {
     const tagDefsSnap = await db().collection('tag_definitions').get();
     const customMappings: CustomTagMapping[] = tagDefsSnap.docs.map(d => ({
@@ -182,9 +270,11 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
       column: d.data().column as CustomTagMapping['column'],
     }));
     const terminEvents = await fetchTerminEvents(opts.from, opts.to, customMappings);
+    terminFetchOk = true;
     const terminDocs: { ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
 
     for (const t of terminEvents) {
+      validTerminIds.add(t.worklogId);
       const d = new Date(t.date);
       const year = d.getUTCFullYear();
       const month = d.getUTCMonth() + 1;
@@ -206,6 +296,76 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     logger.info('Termíny zapsány', { written: terminWritten, skipped: terminSkipped });
   } catch (err: any) {
     logger.warn('Sync termínů selhal (nekritická chyba)', { err: String(err) });
+  }
+
+  // Návštěvy lékaře z Activity Timeline → worklogs_raw (počítají se do odpracovaných hodin)
+  let lekarWritten = 0;
+  let lekarSkipped = 0;
+  let lekarFetchOk = false;
+  const validLekarIds = new Set<string>();
+  try {
+    const lekarEvents = await fetchDoctorVisitEvents(opts.from, opts.to);
+    lekarFetchOk = true;
+    const lekarDocs: { ref: FirebaseFirestore.DocumentReference; data: any }[] = [];
+
+    for (const l of lekarEvents) {
+      validLekarIds.add(l.worklogId);
+      const d = new Date(l.date);
+      const year = d.getUTCFullYear();
+      const month = d.getUTCMonth() + 1;
+
+      if (await isLocked(year, month, l.accountId)) {
+        lekarSkipped++;
+        continue;
+      }
+
+      // Stejně jako Termíny vždy přepisujeme — datum/hodiny se v AT může měnit
+      const ref = db().collection('worklogs_raw').doc(l.worklogId);
+      lekarDocs.push({ ref, data: l });
+    }
+
+    lekarWritten = await commitInChunks(lekarDocs);
+    if (opts.mode === 'override' && lekarDocs.length > 0) {
+      await deleteEditedWorklogs(lekarDocs.map(d => d.data.worklogId));
+    }
+    logger.info('Lékař události zapsány', { written: lekarWritten, skipped: lekarSkipped });
+  } catch (err: any) {
+    logger.warn('Sync návštěv lékaře selhal (nekritická chyba)', { err: String(err) });
+  }
+
+  // Reconciliace — smazat worklogy/absence, jejichž zdroj v Jira/AT už neexistuje.
+  // Kategorie, jejichž fetch výše selhal, se do reconciliace nezahrnou (jinak by prázdná
+  // množina validIds znamenala smazání všech existujících záznamů té kategorie).
+  let worklogsReconciled = 0;
+  let worklogsReconciledSkippedLocked = 0;
+  try {
+    const categories: { name: string; predicate: (data: any) => boolean; validIds: Set<string> }[] = [
+      { name: 'jira', predicate: (d) => !d.source, validIds: allValidJiraIds },
+    ];
+    if (terminFetchOk) categories.push({ name: 'termin', predicate: (d) => d.issueType === 'TERMIN', validIds: validTerminIds });
+    if (lekarFetchOk) categories.push({ name: 'lekar', predicate: (d) => d.issueType === 'LEKAR', validIds: validLekarIds });
+
+    const r = await reconcileWorklogsRaw(opts.from, opts.to, categories);
+    worklogsReconciled = r.deleted;
+    worklogsReconciledSkippedLocked = r.skippedLocked;
+    logger.info('Reconciliace worklogs_raw dokončena', r);
+  } catch (err: any) {
+    logger.warn('Reconciliace worklogs_raw selhala (nekritická chyba)', { err: String(err) });
+  }
+
+  let absencesReconciled = 0;
+  let absencesReconciledSkippedLocked = 0;
+  if (absencesFetchOk) {
+    try {
+      const r = await reconcileAbsences(opts.from, opts.to, validAbsenceIds);
+      absencesReconciled = r.deleted;
+      absencesReconciledSkippedLocked = r.skippedLocked;
+      logger.info('Reconciliace absencí dokončena', r);
+    } catch (err: any) {
+      logger.warn('Reconciliace absencí selhala (nekritická chyba)', { err: String(err) });
+    }
+  } else {
+    logger.warn('Reconciliace absencí přeskočena — fetch absencí selhal');
   }
 
   // Sync členů a rolí z AT (nekritická — chyba neblokuje výsledek syncu)
@@ -254,6 +414,11 @@ export async function syncWorklogs(opts: { from: string; to: string; mode: 'incr
     worklogsSkipped: totalSkipped,
     absencesWritten: absWritten,
     terminWritten,
+    lekarWritten,
+    worklogsReconciled,
+    worklogsReconciledSkippedLocked,
+    absencesReconciled,
+    absencesReconciledSkippedLocked,
     rolesUpdated,
     range: { from: opts.from, to: opts.to },
     mode: opts.mode,

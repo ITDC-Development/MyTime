@@ -12,6 +12,7 @@ import { firestore } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useMembers } from '../hooks/useMembers';
 import { UserSelect } from '../components/common/UserSelect';
+import { DateRangeFields } from '../components/common/DateRangeFields';
 import { api } from '../services/api';
 import { ExportButtons } from '../components/export/ExportButtons';
 import { exportCsv } from '../services/exporters/csvExporter';
@@ -358,23 +359,10 @@ export function SmartReportsPage() {
       <Paper sx={{ p: 3, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 2 }}>1. Načtení dat</Typography>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
-          <TextField
-            label="Od"
-            type="date"
-            size="small"
-            value={dateFrom}
-            onChange={e => { setDateFrom(e.target.value); setDataLoaded(false); }}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: 160 }}
-          />
-          <TextField
-            label="Do"
-            type="date"
-            size="small"
-            value={dateTo}
-            onChange={e => { setDateTo(e.target.value); setDataLoaded(false); }}
-            InputLabelProps={{ shrink: true }}
-            sx={{ width: 160 }}
+          <DateRangeFields
+            from={dateFrom}
+            to={dateTo}
+            onChange={(f, t) => { setDateFrom(f); setDateTo(t); setDataLoaded(false); }}
           />
           <Button
             variant="contained"

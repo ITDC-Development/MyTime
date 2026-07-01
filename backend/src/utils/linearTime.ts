@@ -55,7 +55,7 @@ interface InputWorklog {
   isManual: boolean;
 }
 
-export function linearizeDay(items: InputWorklog[]): LinearWorklog[] {
+export function linearizeDay(items: InputWorklog[], priorMinutesToday: number = 0): LinearWorklog[] {
   if (items.length === 0) return [];
   const sorted = [...items].sort((a, b) =>
     a.started.localeCompare(b.started) || a.worklogId.localeCompare(b.worklogId)
@@ -63,7 +63,7 @@ export function linearizeDay(items: InputWorklog[]): LinearWorklog[] {
   const out: LinearWorklog[] = [];
   let cursor = WORK_START;
   let pauseInserted = false;
-  let workedMinutesToday = 0;
+  let workedMinutesToday = priorMinutesToday;
 
   for (const w of sorted) {
     let remaining = Math.round(w.seconds / 60);
@@ -97,8 +97,11 @@ export function linearizeDay(items: InputWorklog[]): LinearWorklog[] {
       if (!pauseInserted && cursor < PAUSE_START && segmentEnd > PAUSE_START) {
         segmentEnd = PAUSE_START;
       }
+      if (workedMinutesToday < OVERTIME_THRESHOLD_MINUTES && workedMinutesToday + (segmentEnd - cursor) > OVERTIME_THRESHOLD_MINUTES) {
+        segmentEnd = cursor + (OVERTIME_THRESHOLD_MINUTES - workedMinutesToday);
+      }
       const segmentMinutes = segmentEnd - cursor;
-      const isOvertime = workedMinutesToday + segmentMinutes > OVERTIME_THRESHOLD_MINUTES;
+      const isOvertime = workedMinutesToday >= OVERTIME_THRESHOLD_MINUTES;
 
       out.push({
         worklogId: w.worklogId,

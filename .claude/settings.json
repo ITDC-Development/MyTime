@@ -1,4 +1,5 @@
 {
+  "enabledMcpjsonServers": ["code-review-graph"],
   "hooks": {
     "PostToolUse": [
       {
@@ -6,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && code-review-graph update --skip-flows --repo \"C:/Users/Mat\\u011bjHanzl\\u00edk/WebAppMyTime\" || true",
+            "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && \"C:/Users/mirka/AppData/Local/Python/bin/python.exe\" -m code_review_graph update --skip-flows --repo \"C:/Users/Public/Job/MyTime\" || true",
             "timeout": 30
           }
         ]
@@ -18,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && code-review-graph status --repo \"C:/Users/Mat\\u011bjHanzl\\u00edk/WebAppMyTime\" || echo 'Not a git repo, skipping'",
+            "command": "cat >/dev/null || true; git rev-parse --git-dir >/dev/null 2>&1 && \"C:/Users/mirka/AppData/Local/Python/bin/python.exe\" -m code_review_graph status --repo \"C:/Users/Public/Job/MyTime\" || echo 'Not a git repo, skipping'",
             "timeout": 10
           }
         ]

@@ -26,7 +26,7 @@ export interface SourceWorklog {
   priority: string;
 }
 
-export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
+export function linearizeDay(items: SourceWorklog[], priorMinutesToday: number = 0): LinearWorklog[] {
   if (items.length === 0) return [];
   const sorted = [...items].sort(
     (a, b) => a.started.localeCompare(b.started) || a.worklogId.localeCompare(b.worklogId)
@@ -34,7 +34,7 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
   const out: LinearWorklog[] = [];
   let cursor = WORK_START;
   let pauseInserted = false;
-  let workedToday = 0;
+  let workedToday = priorMinutesToday;
 
   for (const w of sorted) {
     let remaining = Math.round(w.seconds / 60);
@@ -61,8 +61,11 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
       if (!pauseInserted && cursor < PAUSE_START && segmentEnd > PAUSE_START) {
         segmentEnd = PAUSE_START;
       }
+      if (workedToday < OVERTIME_THRESHOLD && workedToday + (segmentEnd - cursor) > OVERTIME_THRESHOLD) {
+        segmentEnd = cursor + (OVERTIME_THRESHOLD - workedToday);
+      }
       const segMinutes = segmentEnd - cursor;
-      const isOvertime = workedToday + segMinutes > OVERTIME_THRESHOLD;
+      const isOvertime = workedToday >= OVERTIME_THRESHOLD;
 
       out.push({
         worklogId: w.worklogId,
@@ -96,8 +99,8 @@ export function linearizeDay(items: SourceWorklog[]): LinearWorklog[] {
   return out;
 }
 
-export function linearizeMonth(items: SourceWorklog[]): LinearWorklog[] {
+export function linearizeMonth(items: SourceWorklog[], absenceHoursByDate: Record<string, number> = {}): LinearWorklog[] {
   const byDate: Record<string, SourceWorklog[]> = {};
   for (const w of items) (byDate[w.date] ||= []).push(w);
-  return Object.keys(byDate).sort().flatMap(d => linearizeDay(byDate[d]));
+  return Object.keys(byDate).sort().flatMap(d => linearizeDay(byDate[d], (absenceHoursByDate[d] ?? 0) * 60));
 }

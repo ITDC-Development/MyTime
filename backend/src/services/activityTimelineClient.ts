@@ -44,22 +44,29 @@ function extractBookingEventType(summary: string): string {
   return s.toLowerCase();
 }
 
-function resolveAbsenceType(issueType: string, summary: string): ActivityTimelineEvent['type'] | null {
+// Eventy pojmenované jako návštěva lékaře — nejsou absence, ale worklog (odpracovaný čas)
+function isDoctorVisit(issueType: string, summary: string): boolean {
   const summaryLower = summary.trim().toLowerCase();
+  if (SICK_LEAVE_EXCLUSIONS.has(summaryLower)) return true;
 
-  // Eventy pojmenované jako návštěva lékaře se vylučují bez ohledu na issueType
-  if (SICK_LEAVE_EXCLUSIONS.has(summaryLower)) return null;
+  if (issueType === 'BOOKING') {
+    const pipeIdx = summary.lastIndexOf(' | ');
+    if (pipeIdx !== -1) {
+      const activity = summary.slice(pipeIdx + 3).trim().toLowerCase();
+      if (SICK_LEAVE_EXCLUSIONS.has(activity)) return true;
+    }
+  }
+  return false;
+}
+
+function resolveAbsenceType(issueType: string, summary: string): ActivityTimelineEvent['type'] | null {
+  // Eventy pojmenované jako návštěva lékaře se vylučují bez ohledu na issueType — zapisují se jako worklog, ne absence
+  if (isDoctorVisit(issueType, summary)) return null;
 
   if (ISSUE_TYPE_MAP[issueType]) return ISSUE_TYPE_MAP[issueType];
 
   if (issueType === 'BOOKING') {
     const candidate = extractBookingEventType(summary);
-    // Pokud část za " | " označuje návštěvu lékaře, vyloučit (např. "[Nemoc] Team | Lékař")
-    const pipeIdx = summary.lastIndexOf(' | ');
-    if (pipeIdx !== -1) {
-      const activity = summary.slice(pipeIdx + 3).trim().toLowerCase();
-      if (SICK_LEAVE_EXCLUSIONS.has(activity)) return null;
-    }
     if (BOOKING_SUMMARY_MAP[candidate]) return BOOKING_SUMMARY_MAP[candidate];
   }
 
@@ -279,7 +286,17 @@ export async function fetchAbsences(from: string, to: string, knownMemberRoles?:
           const issueType: string = issue.issueType ?? issue.type ?? '';
           const summary: string = issue.summary ?? '';
           const absenceType = resolveAbsenceType(issueType, summary);
-          if (!absenceType) continue;
+          if (!absenceType) {
+            if (issueType === 'BOOKING' && !isTerminBooking(summary) && !isDoctorVisit(issueType, summary)) {
+              logger.warn('AT: nerozpoznaný BOOKING typ — hodiny se nezapočítávají ani jako práce, ani jako absence', {
+                accountId, username, summary,
+                hours: issue.hours, dailyTimeEstimate: issue.dailyTimeEstimate,
+                start: issue.plannedStart ?? issue.start ?? issue.startDate,
+                end: issue.plannedEnd ?? issue.end ?? issue.endDate,
+              });
+            }
+            continue;
+          }
 
           // For HOLIDAY events from a country-specific team, skip if member belongs to a different country.
           // Prevents CZ team holidays (e.g. May 8) from being written for SK employees.
@@ -397,7 +414,7 @@ export interface AtWorklogEntry {
   started: string;
   issueKey: string;
   date: string;
-  issueType: 'TERMIN';
+  issueType: 'TERMIN' | 'LEKAR';
   priority: string;
   source: 'activity_timeline';
 }
@@ -502,5 +519,107 @@ export async function fetchTerminEvents(from: string, to: string, customMappings
   }
 
   logger.info('AT Termíny načteny', { total: result.length, from, to });
+  return result;
+}
+
+// Návštěvy lékaře z Activity Timeline se nezapisují jako absence, ale jako worklog
+// (započítávají se do odpracovaných hodin, ne do dovolené/nemoci).
+export async function fetchDoctorVisitEvents(from: string, to: string): Promise<AtWorklogEntry[]> {
+  if (USE_MOCK || !process.env.ACTIVITY_TIMELINE_AUTH_TOKEN) return [];
+
+  const baseUrl = process.env.ACTIVITY_TIMELINE_BASE_URL!.trim().replace(/\/+$/, '');
+  const token = process.env.ACTIVITY_TIMELINE_AUTH_TOKEN!.trim();
+  const teamIds = getAllTeamIds();
+  if (teamIds.length === 0) return [];
+
+  const seen = new Set<string>();
+  const result: AtWorklogEntry[] = [];
+
+  for (const teamId of teamIds) {
+    let startAt = 0;
+    let page = 0;
+
+    while (true) {
+      const params = new URLSearchParams({
+        start: from, end: to, teamId,
+        'auth-token': token,
+        maxResults: String(PAGE_SIZE),
+        startAt: String(startAt),
+      });
+
+      let response: any;
+      try {
+        response = await axios.get(`${baseUrl}/rest/api/1/timeline?${params.toString()}`);
+      } catch (err: any) {
+        logger.warn('AT Lékař — team přeskočen', { teamId, status: err?.response?.status });
+        break;
+      }
+
+      const raw = response.data;
+      const members: any[] = raw?.members ?? [];
+      const hasMore: boolean = raw?.hasMore ?? false;
+      const total: number | undefined = raw?.total;
+
+      for (const member of members) {
+        const accountId: string = member.username ?? '';
+        const username: string = member.userRealName ?? member.username ?? '';
+
+        for (const issue of member.issues ?? []) {
+          const issueType: string = issue.issueType ?? '';
+          const summary: string = issue.summary ?? '';
+          if (!isDoctorVisit(issueType, summary)) continue;
+
+          const id = String(issue.id ?? issue.issueKey ?? '');
+          if (seen.has(id)) continue;
+          seen.add(id);
+
+          const startDate = issue.plannedStart ?? issue.start ?? issue.startDate ?? '';
+          const endDate = issue.plannedEnd ?? issue.end ?? issue.endDate ?? startDate;
+          if (!startDate) continue;
+
+          const cur = new Date(startDate + 'T00:00:00Z');
+          const endDt = new Date(endDate + 'T00:00:00Z');
+          const totalDays = Math.max(1, Math.round((endDt.getTime() - cur.getTime()) / 86_400_000) + 1);
+          const hoursPerDay = issue.dailyTimeEstimate != null
+            ? issue.dailyTimeEstimate / 3600
+            : issue.hours != null
+              ? issue.hours / totalDays
+              : 8;
+
+          let dayIndex = 0;
+          while (cur <= endDt) {
+            const date = cur.toISOString().slice(0, 10);
+            if (date >= from && date <= to) {
+              result.push({
+                worklogId: `AT-LEKAR-${id}-${dayIndex}`,
+                user: username,
+                accountId,
+                summary: 'Lékař',
+                parentKey: '', parentSummary: '', parentIssueType: '',
+                components: [], sprint: '', comment: '',
+                seconds: Math.round(hoursPerDay * 3600),
+                started: `${date}T08:00:00.000+0000`,
+                issueKey: `AT-${id}`,
+                date,
+                issueType: 'LEKAR',
+                priority: '',
+                source: 'activity_timeline',
+              });
+            }
+            dayIndex++;
+            cur.setUTCDate(cur.getUTCDate() + 1);
+          }
+        }
+      }
+
+      const fetched = startAt + members.length;
+      if (members.length === 0 || (!hasMore && (total === undefined || fetched >= total))) break;
+      startAt += PAGE_SIZE;
+      page++;
+      if (page >= 50) break;
+    }
+  }
+
+  logger.info('AT Lékař události načteny', { total: result.length, from, to });
   return result;
 }

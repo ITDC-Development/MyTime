@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Stack, TextField, Button, Alert, Box } from '@mui/material';
+import { Button, Alert, Box } from '@mui/material';
 import { PlayArrow } from '@mui/icons-material';
 import { api } from '../../services/api';
+import { DateRangeFields } from '../common/DateRangeFields';
 
 function lastMonthRange() {
   const now = new Date();
@@ -37,10 +38,15 @@ export function DownloadForm() {
 
   return (
     <Box>
-      <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
-        <TextField label="Datum od" type="date" value={from} onChange={e => setFrom(e.target.value)} size="small" InputLabelProps={{ shrink: true }} />
-        <TextField label="Datum do" type="date" value={to} onChange={e => setTo(e.target.value)} size="small" InputLabelProps={{ shrink: true }} />
-      </Stack>
+      <Box sx={{ mb: 2 }}>
+        <DateRangeFields
+          from={from}
+          to={to}
+          onChange={(f, t) => { setFrom(f); setTo(t); }}
+          fromLabel="Datum od"
+          toLabel="Datum do"
+        />
+      </Box>
       <Alert severity="info" sx={{ mb: 2 }}>
         Bez datumů se stáhnou jen nové worklogy (incremental). S datumy se přepíší všechny worklogy v rozsahu.
       </Alert>
